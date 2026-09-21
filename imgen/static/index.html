@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IMGEN — Qwen-Image-2.1</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="topbar">
+      <div class="brand">
+        <img src="/favicon.svg" alt="" width="28" height="28" />
+        <div>
+          <div class="brand-name">IMGEN</div>
+          <div class="brand-sub" data-i="tagline">Qwen-Image-2.1</div>
+        </div>
+      </div>
+      <div class="mode-switch" role="tablist">
+        <button type="button" id="modeGen" class="active" data-i="generate">生图</button>
+        <button type="button" id="modeEdit" data-i="edit">改图</button>
+      </div>
+      <div class="top-spacer"></div>
+      <span class="chip" id="deviceChip"></span>
+      <span class="chip" id="modelChip"></span>
+      <span class="chip hidden" id="demoChip" data-i="demo">Demo</span>
+      <button type="button" class="ghost" id="toggleComposer">面板</button>
+      <button type="button" class="ghost" id="toggleHistory" data-i="history">历史</button>
+      <button type="button" class="icon-btn" id="openSettings" title="Settings">⚙</button>
+      <button type="button" class="ghost" id="langToggle">EN</button>
+    </header>
+
+    <div class="workspace">
+      <aside class="composer" id="composer">
+        <div>
+          <div class="section-label"><span data-i="prompt">提示词</span></div>
+          <textarea id="prompt" rows="6"></textarea>
+          <div class="hint" id="promptHint"></div>
+        </div>
+
+        <div>
+          <div class="section-label">
+            <span data-i="presets">预置提示词</span>
+            <button type="button" class="ghost" id="lucky" data-i="lucky">随机</button>
+          </div>
+          <div class="preset-cats" id="presetCats"></div>
+          <div class="preset-list" id="presetList"></div>
+        </div>
+
+        <div id="refSection" class="hidden">
+          <div class="section-label">
+            <span data-i="refs">参考图</span>
+            <span id="refCount">0 / 10</span>
+          </div>
+          <div class="dropzone" id="dropzone" data-i="drop">拖入、粘贴或点击上传</div>
+          <input id="fileInput" class="sr" type="file" accept="image/*" multiple />
+          <div class="ref-grid" id="refGrid"></div>
+          <p class="hint" data-i="refsHint"></p>
+        </div>
+
+        <div>
+          <div class="section-label"><span data-i="params">参数</span><span class="hint" data-i="recommended">官方推荐</span></div>
+          <div class="param-grid">
+            <div class="field">
+              <label data-i="scale">分辨率</label>
+              <div class="seg" id="scaleSeg"></div>
+            </div>
+            <div class="field">
+              <label data-i="aspect">画幅</label>
+              <div class="seg" id="aspectSeg"></div>
+            </div>
+            <div class="row">
+              <div class="field">
+                <label><span data-i="steps">步数</span><b id="stepsVal">40</b></label>
+                <input id="steps" type="range" min="4" max="80" step="1" value="40" />
+              </div>
+              <div class="field">
+                <label><span data-i="cfg">CFG</span><b id="cfgVal">1.0</b></label>
+                <input id="cfg" type="range" min="1" max="8" step="0.1" value="1" />
+              </div>
+            </div>
+            <p class="hint" data-i="cfgHint"></p>
+            <div class="row">
+              <div class="field">
+                <label data-i="seed">种子</label>
+                <input id="seed" type="number" value="-1" />
+              </div>
+              <div class="field">
+                <label data-i="nImages">出图数量</label>
+                <input id="nImages" type="number" min="1" max="4" value="1" />
+              </div>
+            </div>
+            <label class="toggle"><span data-i="kvCache">KV Cache</span><button type="button" class="switch on" id="kv"></button></label>
+            <label class="toggle"><span data-i="transparent">RGBA</span><button type="button" class="switch" id="rgba"></button></label>
+            <label class="toggle" id="followRow"><span data-i="followRef">跟随参考图</span><button type="button" class="switch on" id="follow"></button></label>
+            <details>
+              <summary data-i="advanced">高级</summary>
+              <div class="row" style="margin-top:10px">
+                <div class="field"><label data-i="width">宽</label><input id="width" type="number" min="256" max="2752" step="32" /></div>
+                <div class="field"><label data-i="height">高</label><input id="height" type="number" min="256" max="2752" step="32" /></div>
+              </div>
+              <div class="field">
+                <label data-i="outputRes">output_resolution</label>
+                <input id="outRes" type="number" min="512" max="2752" step="64" value="2048" />
+                <p class="hint" data-i="outputResHint"></p>
+              </div>
+              <div class="field">
+                <label data-i="negative">负向提示词</label>
+                <textarea id="negative" rows="3"></textarea>
+                <p class="hint" data-i="negativeHint"></p>
+              </div>
+              <div class="field">
+                <label data-i="vaeTiling">VAE Tiling</label>
+                <select id="vaeTiling">
+                  <option value="auto">auto</option>
+                  <option value="true">on</option>
+                  <option value="false">off</option>
+                </select>
+              </div>
+            </details>
+          </div>
+        </div>
+        <div class="runbar">
+          <button type="button" class="btn-gold" id="run" data-i="run">生成</button>
+          <button type="button" class="btn hidden" id="cancel" data-i="cancel">取消</button>
+        </div>
+      </aside>
+
+      <main class="stage">
+        <div class="canvas">
+          <div class="frame" id="frame">
+            <div class="empty" id="empty">
+              <h2 data-i="emptyStage">先有光，才有画面。</h2>
+              <p data-i="emptyStageSub"></p>
+            </div>
+            <img class="result hidden" id="result" alt="result" />
+            <div class="progress hidden" id="progress">
+              <div id="progressText"></div>
+              <div class="bar"><span id="progressBar"></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="toolbar">
+          <button type="button" class="ghost" id="downloadBtn" data-i="downloadImg">下载</button>
+          <button type="button" class="ghost" id="reuseBtn" data-i="reuse">复用参数</button>
+          <button type="button" class="ghost" id="sendEditBtn" data-i="sendEdit">送到改图</button>
+        </div>
+      </main>
+
+      <aside class="history" id="historyPane">
+        <div class="history-head">
+          <input id="historySearch" type="text" data-i-placeholder="searchHistory" placeholder="搜索…" />
+        </div>
+        <div class="history-list" id="historyList"></div>
+        <div class="detail hidden" id="historyDetail"></div>
+      </aside>
+    </div>
+  </div>
+
+  <dialog id="wizard">
+    <form class="wizard" method="dialog">
+      <div class="steps" id="wizardSteps"><span class="on"></span><span></span><span></span><span></span></div>
+      <div id="wizardBody"></div>
+      <div class="wizard-nav">
+        <button type="button" class="ghost" id="wizBack" data-i="back">返回</button>
+        <button type="button" class="btn-gold" id="wizNext" data-i="next">继续</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="settings">
+    <form class="wizard" method="dialog">
+      <h1 data-i="settings">设置</h1>
+      <div class="field" style="margin-top:12px">
+        <label data-i="hub">来源</label>
+        <select id="setHub">
+          <option value="huggingface">Hugging Face</option>
+          <option value="modelscope">ModelScope</option>
+        </select>
+      </div>
+      <div class="field">
+        <label data-i="model">模型</label>
+        <select id="setModel">
+          <option value="qwen-image-2.1">Qwen-Image-2.1 (BF16)</option>
+          <option value="image21-int8">Image21-INT8</option>
+        </select>
+      </div>
+      <div class="field"><label data-i="hfToken">HF Token</label><input id="setHf" type="password" autocomplete="off" /></div>
+      <div class="field"><label data-i="msToken">ModelScope Token</label><input id="setMs" type="password" autocomplete="off" /></div>
+      <p class="hint" data-i="licenseNote"></p>
+      <div class="wizard-nav">
+        <button type="button" class="ghost" id="revealOut" data-i="reveal">打开文件夹</button>
+        <button type="submit" class="btn-gold" id="saveSettings" data-i="save">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toasts" id="toasts"></div>
+  <script src="/js/i18n.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

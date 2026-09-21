@@ -1,0 +1,746 @@
+{
+  "generate": [
+    {
+      "id": "portrait",
+      "icon": "◎",
+      "zh": "人像摄影",
+      "en": "Portrait",
+      "prompts": [
+        {
+          "id": "zh-window-portrait",
+          "title_zh": "窗边日光人像",
+          "title_en": "Window-light portrait",
+          "prompt": "一张写实摄影风格的中国年轻成年女性肖像，人物明确为25岁成年人。黑色及肩直发，穿着米白色圆领针织衫，胸部以上构图，正面看向镜头，神情自然放松，轻微微笑。窗边柔和的自然日光，浅灰色简洁背景，真实自然的皮肤纹理和少量雀斑，淡妆，不过度磨皮。85mm人像摄影，浅景深，色彩自然，画面中没有文字。"
+        },
+        {
+          "id": "en-elderly-window",
+          "title_zh": "银发纪实肖像",
+          "title_en": "Documentary elder portrait",
+          "prompt": "A natural documentary portrait of an elderly woman with silver hair and freckles, wearing a blue wool sweater, standing beside a window in soft morning light. Realistic skin texture, gentle expression, waist-up composition."
+        },
+        {
+          "id": "zh-male-studio",
+          "title_zh": "影棚侧光男肖像",
+          "title_en": "Studio side-light male portrait",
+          "prompt": "影棚人像，一位约30岁东亚男性，短发，浅青灰西装与白色衬衫，无领带。伦勃朗光，深炭灰背景，眼神沉静。85mm，f/2，皮肤纹理真实，胡青清晰，电影感色彩，画面中没有文字、没有水印。"
+        },
+        {
+          "id": "en-golden-hour",
+          "title_zh": "黄金时刻街拍",
+          "title_en": "Golden-hour street portrait",
+          "prompt": "Cinematic golden-hour street portrait of a young Black man in a rust-colored overcoat, sunlight catching the edge of his profile, busy city bokeh behind him, 50mm, natural skin, film grain, no text."
+        },
+        {
+          "id": "zh-editorial-fashion",
+          "title_zh": "杂志封面气质",
+          "title_en": "Editorial fashion cover",
+          "prompt": "高定杂志封面气质人像，一位南亚女性，盘发，深酒红丝绸衬衫，锁骨光，空气感薄雾，中灰背景。中画幅相机质感，细节锐利但不假，高级去饱和色彩，画面中没有文字。"
+        },
+        {
+          "id": "en-child-garden",
+          "title_zh": "庭院自然光儿童",
+          "title_en": "Garden child portrait",
+          "prompt": "A candid photograph of an 8-year-old child sitting on sunlit stone steps in a small garden, holding a paper windmill, natural smile, freckles, cotton clothes, 35mm documentary look, no logos, no text."
+        },
+        {
+          "id": "zh-ink-scholar",
+          "title_zh": "水墨气质文人",
+          "title_en": "Ink-wash scholar",
+          "prompt": "新中式文人肖像：中年男性，青衫，手持折扇未开，竹影投在素壁上。柔和顶侧光，宣纸般的灰白背景，写实面部与写意空间结合，极简构图，没有文字。"
+        },
+        {
+          "id": "en-rimlight-profile",
+          "title_zh": "轮廓光侧脸",
+          "title_en": "Rim-light profile",
+          "prompt": "Dramatic profile portrait, rim light outlining the nose and jaw, dark charcoal studio, a woman with short curly hair and a black turtleneck, fine skin texture, cinematic contrast, no jewelry logos, no text."
+        }
+      ]
+    },
+    {
+      "id": "landscape",
+      "icon": "◈",
+      "zh": "风光风景",
+      "en": "Landscape",
+      "prompts": [
+        {
+          "id": "zh-huangshan-sea",
+          "title_zh": "黄山云海日出",
+          "title_en": "Huangshan sea of clouds",
+          "prompt": "黄山日出，山峰从云海中露出，金橙色第一缕阳光掠过松针，空气清澈，远山层层淡蓝。大幅风光摄影，前景有岩石纹理，没有人物，没有文字。"
+        },
+        {
+          "id": "en-iceland-black-sand",
+          "title_zh": "冰岛黑沙滩",
+          "title_en": "Iceland black sand",
+          "prompt": "Wide landscape of a black sand beach in Iceland, basalt stacks in the distance, long-exposure silky waves, storm light breaking through clouds, 16mm, ultra-detailed, no people, no text."
+        },
+        {
+          "id": "zh-jiangnan-rain",
+          "title_zh": "江南烟雨巷",
+          "title_en": "Jiangnan rainy alley",
+          "prompt": "江南水乡烟雨，青石板巷被雨水浸湿，白墙黛瓦倒映在水洼里，远处一把油纸伞。柔和散射光，电影静帧，空气透视，没有清晰可辨的招牌文字。"
+        },
+        {
+          "id": "en-redwood-fog",
+          "title_zh": "红杉林雾气",
+          "title_en": "Redwood fog",
+          "prompt": "Towering redwood forest at dawn, volumetric fog shafts, moss on bark, a small creek in the foreground, photographic realism, cool green palette, no people, no text."
+        },
+        {
+          "id": "zh-desert-night",
+          "title_zh": "沙漠星空",
+          "title_en": "Desert starfield",
+          "prompt": "塔克拉玛干沙漠夜景，沙丘曲线被月光勾边，银河清晰可见，前景一棵枯胡杨。超广角风光摄影，高动态，细腻沙粒，没有帐篷、没有文字。"
+        },
+        {
+          "id": "en-terraces",
+          "title_zh": "梯田晨雾",
+          "title_en": "Rice terraces",
+          "prompt": "Yuanyang rice terraces at sunrise, mirror-like water catching pink clouds, layered curves receding into mist, aerial-adjacent high viewpoint, photographic, no text."
+        },
+        {
+          "id": "zh-coast-cliff",
+          "title_zh": "悬崖海岸",
+          "title_en": "Cliff coastline",
+          "prompt": "中国南部悬崖海岸，翠绿草甸直落到深蓝海水，浪花拍打白色泡沫。午后硬光被薄云柔化，大画幅风光，构图留白，没有建筑，没有文字。"
+        }
+      ]
+    },
+    {
+      "id": "product",
+      "icon": "◻",
+      "zh": "产品静物",
+      "en": "Product",
+      "prompts": [
+        {
+          "id": "zh-ceramic-teapot",
+          "title_zh": "木桌上的陶壶",
+          "title_en": "Ceramic teapot",
+          "prompt": "A ceramic teapot on a wooden table, soft window light from the left, visible glaze irregularities, steam just beginning, shallow depth of field, editorial product photography, no logos, no text."
+        },
+        {
+          "id": "zh-watch-macro",
+          "title_zh": "腕表微距",
+          "title_en": "Watch macro",
+          "prompt": "高端机械腕表微距，阳光透过窗帘落在表盘上，指针与刻度锐利，皮革表带纹理清晰。深色大理石台面，商业静物摄影，画面中没有品牌名、没有文字。"
+        },
+        {
+          "id": "en-sneaker-studio",
+          "title_zh": "球鞋棚拍",
+          "title_en": "Studio sneaker",
+          "prompt": "Studio product shot of a cream and olive sneaker on a seamless warm gray sweep, one hard key light and a soft fill, accurate stitching and foam texture, 3/4 view, no logos, no text."
+        },
+        {
+          "id": "zh-skincare",
+          "title_zh": "护肤玻璃瓶",
+          "title_en": "Skincare glass bottle",
+          "prompt": "护肤精华玻璃瓶，淡金色液体，水珠凝在瓶身，旁边几片湿润的绿叶。干净米白背景，柔箱光，商业广告静物，瓶身保持素净，没有标签文字。"
+        },
+        {
+          "id": "en-headphones",
+          "title_zh": "耳机材质特写",
+          "title_en": "Headphone materials",
+          "prompt": "Close-up product photograph of over-ear headphones, matte aluminum and cognac leather, studio lighting, dust-free, precise reflections, dark slate background, no brand marks, no text."
+        },
+        {
+          "id": "zh-inkstone",
+          "title_zh": "砚台与宣纸",
+          "title_en": "Inkstone still life",
+          "prompt": "文房静物：歙砚、松烟墨、羊毫笔搁在宣纸上，一缕侧光扫过石纹。低饱和、高质感，博物馆陈列光线，画面中纸面空白，没有书写文字。"
+        },
+        {
+          "id": "en-perfume",
+          "title_zh": "香水光影",
+          "title_en": "Perfume caustics",
+          "prompt": "A faceted glass perfume bottle catching caustic light patterns on a pale peach surface, ultra-sharp, luxury advertising photography, unlabeled bottle, no text."
+        }
+      ]
+    },
+    {
+      "id": "cn-poster",
+      "icon": "文",
+      "zh": "中文海报",
+      "en": "Chinese poster",
+      "prompts": [
+        {
+          "id": "zh-cafe-poster",
+          "title_zh": "咖啡馆营业海报",
+          "title_en": "Cafe hours poster",
+          "prompt": "设计一张现代咖啡馆海报，米白背景，中央一杯拉花拿铁。顶部准确写上中文大标题“慢下来，喝杯咖啡”，下方准确写上“小店今日营业”。文字清晰，留白充分，暖色摄影，不添加其他文字。"
+        },
+        {
+          "id": "zh-bookstore",
+          "title_zh": "独立书店海报",
+          "title_en": "Bookstore poster",
+          "prompt": "竖版独立书店海报，深墨绿底。顶部准确大标题“夜间书房”，中部准确副标题“周四晚 19:30 朗读会”，底部准确小字“自由入座”。画面左侧一盏暖黄台灯和一摞旧书，文字锐利，不添加其他文字。"
+        },
+        {
+          "id": "zh-tea",
+          "title_zh": "春茶包装主视觉",
+          "title_en": "Spring tea key visual",
+          "prompt": "茶叶包装主视觉，宣纸底纹。中央准确写上“龙井新茶”，下方准确写上“明前 · 西湖”。旁侧几片新鲜茶叶和一只青瓷杯，极简东方排版，文字清晰，不添加其他文字。"
+        },
+        {
+          "id": "zh-exhibition",
+          "title_zh": "展览主视觉",
+          "title_en": "Exhibition key visual",
+          "prompt": "当代艺术展览海报，浅灰背景。准确大标题“光的重量”，准确副标题“2026 秋季群展”。几何光影穿过一张宣纸，极简排版，中文宋体清晰锐利，不添加其他文字。"
+        },
+        {
+          "id": "zh-midautumn",
+          "title_zh": "中秋礼盒海报",
+          "title_en": "Mid-Autumn poster",
+          "prompt": "中秋礼盒海报，暖月金色与墨蓝。准确标题“月圆人圆”，准确副标题“家庭礼盒”。一轮满月、桂花与一只素净陶盒，文字居中，清晰可读，不添加其他文字或英文。"
+        },
+        {
+          "id": "zh-travel",
+          "title_zh": "城市旅行海报",
+          "title_en": "City travel poster",
+          "prompt": "城市旅行海报，黄昏的上海外滩剪影作为背景。准确大标题“回风里去”，准确副标题“周末慢行指南”。印刷网点与摄影结合，中文排版工整，不添加其他文字。"
+        }
+      ]
+    },
+    {
+      "id": "en-lettering",
+      "icon": "Aa",
+      "zh": "英文字体",
+      "en": "English lettering",
+      "prompts": [
+        {
+          "id": "en-create-with-light",
+          "title_zh": "CREATE WITH LIGHT",
+          "title_en": "CREATE WITH LIGHT",
+          "prompt": "A clean editorial poster with a deep blue background. Large exact headline at the top: \"CREATE WITH LIGHT\". Smaller exact subtitle: \"September 2026\". A realistic orange desk lamp occupies the lower half. Elegant balanced typography, no additional text."
+        },
+        {
+          "id": "en-neon-sign",
+          "title_zh": "雨夜霓虹招牌",
+          "title_en": "Rainy neon sign",
+          "prompt": "A neon shop sign that reads \"QWEN IMAGE 2.1\", rainy night, reflections on wet pavement, cinematic teal and magenta, photographic, no extra words on the sign."
+        },
+        {
+          "id": "en-magazine",
+          "title_zh": "杂志内页标题",
+          "title_en": "Magazine spread title",
+          "prompt": "Editorial magazine spread, cream paper texture. Exact large serif headline: \"QUIET MATERIALS\". Exact small caption: \"A study of clay, linen and light\". A still-life photograph of folded linen on the right, no other text."
+        },
+        {
+          "id": "en-wayfinding",
+          "title_zh": "美术馆导视",
+          "title_en": "Gallery wayfinding",
+          "prompt": "A museum wayfinding panel on travertine. Exact words: \"GALLERY THREE\" on the first line and \"PHOTOGRAPHY\" on the second line. Helvetica-like grotesk, generous tracking, soft museum lighting, no extra text."
+        },
+        {
+          "id": "en-packaging",
+          "title_zh": "咖啡包装字母",
+          "title_en": "Coffee bag lettering",
+          "prompt": "Matte black coffee bag on a wooden counter. Exact word on the bag: \"HALO\". Exact smaller line: \"SINGLE ORIGIN\". Studio product lighting, tactile paper, no extra text."
+        },
+        {
+          "id": "en-book-cover",
+          "title_zh": "小说封面",
+          "title_en": "Novel cover",
+          "prompt": "A hardcover novel standing on a desk. Exact title: \"THE LAST FERRY\". Exact author line: \"A. LIN\". Foggy harbor illustration, restrained palette, print-ready typography, no extra text."
+        }
+      ]
+    },
+    {
+      "id": "illustration",
+      "icon": "✎",
+      "zh": "插画绘本",
+      "en": "Illustration",
+      "prompts": [
+        {
+          "id": "zh-picture-book",
+          "title_zh": "绘本森林小屋",
+          "title_en": "Picture-book cottage",
+          "prompt": "儿童绘本插画，一座圆木小屋坐落在秋色森林里，屋顶有暖黄窗口，一只红狐坐在台阶上。厚涂水粉质感，柔和轮廓，丰富但不杂乱的细节，没有文字。"
+        },
+        {
+          "id": "en-gouache-city",
+          "title_zh": "水粉城市一角",
+          "title_en": "Gouache city corner",
+          "prompt": "Gouache illustration of a quiet European street corner at dusk, bakeries closing, a bicycle, warm windows, painterly shapes, limited palette of ochre, teal and cream, no text, no logos."
+        },
+        {
+          "id": "zh-botanical",
+          "title_zh": "博物志植物",
+          "title_en": "Botanical plate",
+          "prompt": "博物志风格植物插画：一枝玉兰，铅笔底稿加淡水彩，纸色微黄，叶脉与花蕊精细，科学绘图构图，页面空白处不要写字。"
+        },
+        {
+          "id": "en-risograph",
+          "title_zh": "孔版双色海报插画",
+          "title_en": "Risograph illustration",
+          "prompt": "Risograph-style illustration of a giant cat sleeping on a rooftop, fluorescent pink and muted blue inks, visible paper tooth, slight misregistration, playful, no text."
+        },
+        {
+          "id": "zh-ink-landscape",
+          "title_zh": "当代水墨山水",
+          "title_en": "Contemporary ink landscape",
+          "prompt": "当代水墨：远山以淡墨渲染，近处一叶扁舟，留白即水。宣纸纤维可见，不是摄影，没有印章也没有题字。"
+        },
+        {
+          "id": "en-isometric",
+          "title_zh": "等轴房间",
+          "title_en": "Isometric room",
+          "prompt": "Isometric illustration of a tiny writer's room: oak desk, houseplant, record player, afternoon light through blinds, clean vector-painterly hybrid, cozy, no readable text on spines."
+        }
+      ]
+    },
+    {
+      "id": "anime",
+      "icon": "✧",
+      "zh": "动漫二次元",
+      "en": "Anime",
+      "prompts": [
+        {
+          "id": "zh-kyoto-girl",
+          "title_zh": "放学后的走廊",
+          "title_en": "After-school corridor",
+          "prompt": "新海诚式动画静帧，高中女生站在放学后的空走廊，晚霞从窗户涌进来，发丝与裙褶有风。细腻光影，电影宽银幕构图，不是写实摄影，画面中没有文字。"
+        },
+        {
+          "id": "en-mecha-hangar",
+          "title_zh": "机库里的机体",
+          "title_en": "Mecha hangar",
+          "prompt": "Anime still of a worn mecha standing in a sunlit hangar, ground crew as tiny silhouettes, volumetric dust, Ghibli-meets-production-design, painterly metal, no logos, no text."
+        },
+        {
+          "id": "zh-festival",
+          "title_zh": "夏日祭夜",
+          "title_en": "Summer festival night",
+          "prompt": "日式夏日祭动画场景，浴衣少女背对镜头看烟火，灯笼暖光，人群虚化。高饱和夜色，细腻发丝，不是三次元真人，画面中灯笼不要出现可识别文字。"
+        },
+        {
+          "id": "en-witch-kitchen",
+          "title_zh": "魔女厨房",
+          "title_en": "Witch kitchen",
+          "prompt": "Studio-Ghibli-inspired kitchen of a young witch, herbs hanging, copper pots, a black cat on the windowsill, golden morning light, hand-painted background look, no text."
+        },
+        {
+          "id": "zh-cyber-alley",
+          "title_zh": "赛博雨巷",
+          "title_en": "Cyber rainy alley",
+          "prompt": "赛博朋克动画分镜，窄巷积水倒映霓虹，一位穿连帽外套的少年撑伞走过。硬边上色与精细背景结合，氛围浓，招牌保持抽象光斑，不要可阅读文字。"
+        }
+      ]
+    },
+    {
+      "id": "rgba",
+      "icon": "◇",
+      "zh": "透明贴纸",
+      "en": "Transparent",
+      "prompts": [
+        {
+          "id": "rgba-dragon",
+          "title_zh": "卡通龙贴纸",
+          "title_en": "Cartoon dragon sticker",
+          "prompt": "This is an RGBA image with transparency. A cute cartoon dragon sticker. The image has alpha channel and the background is transparent."
+        },
+        {
+          "id": "rgba-teacup",
+          "title_zh": "青瓷杯贴纸",
+          "title_en": "Celadon cup sticker",
+          "prompt": "This is an RGBA image with transparency. A celadon teacup with a small crack glazed in gold, sticker illustration, clean edges. The image has alpha channel and the background is transparent."
+        },
+        {
+          "id": "rgba-cat",
+          "title_zh": "线稿小猫",
+          "title_en": "Line-art cat",
+          "prompt": "This is an RGBA image with transparency. A sitting calico cat, thick friendly outlines, flat colors, die-cut sticker. The image has alpha channel and the background is transparent."
+        },
+        {
+          "id": "rgba-badge",
+          "title_zh": "金属徽章",
+          "title_en": "Enamel badge",
+          "prompt": "This is an RGBA image with transparency. A round enamel pin of a crescent moon and a tiny house, gold metal edge, glossy enamel. The image has alpha channel and the background is transparent."
+        },
+        {
+          "id": "rgba-lantern",
+          "title_zh": "纸灯笼",
+          "title_en": "Paper lantern",
+          "prompt": "This is an RGBA image with transparency. A glowing red paper lantern with gold tassels, product-cutout look. The image has alpha channel and the background is transparent."
+        },
+        {
+          "id": "rgba-mascot",
+          "title_zh": "品牌吉祥物",
+          "title_en": "Mascot cutout",
+          "prompt": "This is an RGBA image with transparency. A round steamed bun mascot with tiny arms, blushing cheeks, chibi, merch-ready. The image has alpha channel and the background is transparent."
+        }
+      ]
+    },
+    {
+      "id": "architecture",
+      "icon": "⌂",
+      "zh": "建筑空间",
+      "en": "Architecture",
+      "prompts": [
+        {
+          "id": "zh-suzhou-museum",
+          "title_zh": "当代园林展厅",
+          "title_en": "Garden museum hall",
+          "prompt": "当代园林博物馆室内，白色墙体与水面庭院相连，光线从高侧窗落下。建筑摄影，人物仅作比例点景且模糊，材料真实，没有导视文字。"
+        },
+        {
+          "id": "en-concrete-chapel",
+          "title_zh": "混凝土小教堂",
+          "title_en": "Concrete chapel",
+          "prompt": "A small concrete chapel in a pine forest, a single slit of light cutting the nave, Tadao Ando atmosphere, large-format architectural photography, empty pews, no signage, no text."
+        },
+        {
+          "id": "zh-hutong-renovation",
+          "title_zh": "胡同改造咖啡",
+          "title_en": "Hutong cafe",
+          "prompt": "北京胡同改造咖啡馆，灰砖、玻璃屋顶、一棵保留的枣树。午后阳光，室内建筑摄影，桌面整洁，菜单是空白卡纸，没有可读文字。"
+        },
+        {
+          "id": "en-night-tower",
+          "title_zh": "夜景塔楼",
+          "title_en": "Night tower",
+          "prompt": "A slender glass residential tower at blue hour, warm interior lights, wet plaza reflections, architectural photograph, precise verticals, no billboards with readable text."
+        },
+        {
+          "id": "zh-library",
+          "title_zh": "阶梯图书馆",
+          "title_en": "Terraced library",
+          "prompt": "阶梯式公共图书馆中庭，木色座位层层向上，顶部天光均匀。人文建筑摄影，书籍在远处是色块而非文字，空间安静。"
+        }
+      ]
+    },
+    {
+      "id": "food",
+      "icon": "◉",
+      "zh": "美食",
+      "en": "Food",
+      "prompts": [
+        {
+          "id": "zh-xiaolongbao",
+          "title_zh": "小笼包特写",
+          "title_en": "Xiaolongbao close-up",
+          "prompt": "刚出笼的小笼包特写，褶皱清晰，顶端一点焦色，蒸汽还在。竹蒸笼与桌面油润，自然窗光，美食摄影，没有筷子上的商标，没有文字。"
+        },
+        {
+          "id": "en-sourdough",
+          "title_zh": "酸面包切开",
+          "title_en": "Sourdough crumb",
+          "prompt": "A loaf of sourdough torn open on linen, open crumb, flour dust, morning window light, food photography, no labels, no text."
+        },
+        {
+          "id": "zh-mapo",
+          "title_zh": "麻婆豆腐",
+          "title_en": "Mapo tofu",
+          "prompt": "一碗麻婆豆腐，红油表面有辣椒与花椒，豆腐嫩白，香葱末点缀。俯拍 45 度，餐馆暖光，食欲感强，碗盘素净，没有文字。"
+        },
+        {
+          "id": "en-omakase",
+          "title_zh": "寿司柜台",
+          "title_en": "Sushi counter",
+          "prompt": "A single piece of toro nigiri on a dark lacquered board, chef's hands in the background out of focus, precise food photography, shallow depth, no menu text."
+        },
+        {
+          "id": "zh-afternoon-tea",
+          "title_zh": "下午茶静物",
+          "title_en": "Afternoon tea",
+          "prompt": "下午茶静物：一杯红茶、一块柠檬挞、亚麻桌布，侧逆光让蒸汽可见。生活杂志摄影风格，器皿无品牌，画面中没有文字。"
+        }
+      ]
+    },
+    {
+      "id": "fashion",
+      "icon": "◈",
+      "zh": "时尚大片",
+      "en": "Fashion",
+      "prompts": [
+        {
+          "id": "zh-silk-wind",
+          "title_zh": "丝绸与风",
+          "title_en": "Silk in wind",
+          "prompt": "时尚大片，模特身着月白真丝长裙站在海边礁石上，风把裙摆吹起。黄金时刻，中画幅，皮肤真实，服装褶皱细腻，没有品牌标识，没有文字。"
+        },
+        {
+          "id": "en-tailoring",
+          "title_zh": "灰色西装结构",
+          "title_en": "Grey tailoring",
+          "prompt": "Editorial fashion photograph of a man in an oversized grey wool suit, architectural concrete background, hard daylight, precise tailoring details, no logos, no text."
+        },
+        {
+          "id": "zh-new-chinese",
+          "title_zh": "新中式高定",
+          "title_en": "New Chinese couture",
+          "prompt": "新中式高定：立领、暗纹提花、马蹄袖的当代剪裁，模特站在素白展厅。柔和顶光，高级灰，服装细节清晰，没有刺绣文字。"
+        },
+        {
+          "id": "en-street-layering",
+          "title_zh": "城市叠穿",
+          "title_en": "City layering",
+          "prompt": "Street-style photograph, layered technical coat over a knit, wet cobblestones, overcast northern light, candid stride, no readable graphics on clothing."
+        }
+      ]
+    },
+    {
+      "id": "scifi",
+      "icon": "✦",
+      "zh": "科幻奇幻",
+      "en": "Sci-fi / Fantasy",
+      "prompts": [
+        {
+          "id": "en-capybara-wizard",
+          "title_zh": "巫师帽卡皮巴拉",
+          "title_en": "Wizard capybara",
+          "prompt": "A capybara wearing a wizard hat, oil painting, rich impasto, warm library background, storybook lighting."
+        },
+        {
+          "id": "zh-moon-station",
+          "title_zh": "月面研究所",
+          "title_en": "Lunar research base",
+          "prompt": "近未来月面研究所，低重力尘埃，模块化建筑与地球同在地平线。写实科幻概念图，摄影感，太阳硬光，舱体表面没有可读文字。"
+        },
+        {
+          "id": "en-ancient-library",
+          "title_zh": "地下古城图书馆",
+          "title_en": "Underground library",
+          "prompt": "A vast underground library lit by floating lanterns, stone arches, a lone figure in a long coat, fantasy concept art with photographic materials, no readable glyphs."
+        },
+        {
+          "id": "zh-silk-road-airship",
+          "title_zh": "丝绸之路飞艇",
+          "title_en": "Silk Road airship",
+          "prompt": "蒸汽与丝绸并存的飞艇停在沙漠绿洲，帆布、木材与黄铜结构。黄金时刻概念艺术，细节丰富，旗帜保持纯色，没有纹章文字。"
+        },
+        {
+          "id": "en-biolume-forest",
+          "title_zh": "生物荧光森林",
+          "title_en": "Bioluminescent forest",
+          "prompt": "Night forest with bioluminescent fungi and a shallow river, a traveler with a lantern, cinematic fantasy, volumetric fog, no text."
+        }
+      ]
+    },
+    {
+      "id": "interior",
+      "icon": "▣",
+      "zh": "室内设计",
+      "en": "Interior",
+      "prompts": [
+        {
+          "id": "zh-wabi-living",
+          "title_zh": "侘寂客厅",
+          "title_en": "Wabi-sabi living room",
+          "prompt": "侘寂风客厅，石灰墙、老榆木茶几、亚麻沙发，一束干莲蓬。北向自然光，室内设计摄影，桌面无杂志文字，空间安静。"
+        },
+        {
+          "id": "en-loft-kitchen",
+          "title_zh": "阁楼厨房",
+          "title_en": "Loft kitchen",
+          "prompt": "A converted loft kitchen, stainless counters, open shelves with ceramic bowls, morning light, architectural interior photograph, no packaged goods with labels."
+        },
+        {
+          "id": "zh-kids-room",
+          "title_zh": "儿童房",
+          "title_en": "Children's room",
+          "prompt": "明亮的儿童房，原木床、亚麻窗帘、一架小木马。柔和散射光，室内摄影，墙面装饰是抽象色块，没有字母海报。"
+        },
+        {
+          "id": "en-bathroom",
+          "title_zh": "石材浴室",
+          "title_en": "Stone bathroom",
+          "prompt": "A spa bathroom in honed limestone, a single window to bamboo, steam in the air, luxury interior photography, unlabeled bottles, no text."
+        }
+      ]
+    },
+    {
+      "id": "still-life",
+      "icon": "○",
+      "zh": "艺术静物",
+      "en": "Still life",
+      "prompts": [
+        {
+          "id": "en-three-cups",
+          "title_zh": "三只杯子",
+          "title_en": "Three cups",
+          "prompt": "A studio photograph on a light gray tabletop: exactly three ceramic cups in a row, a red cup on the left, a blue cup in the middle, and a yellow cup on the right. A single green apple sits in front of the blue cup. Soft shadows, no text."
+        },
+        {
+          "id": "zh-fruit-oil",
+          "title_zh": "油画水果",
+          "title_en": "Oil-paint fruit",
+          "prompt": "古典油画静物：一只切开的石榴、两个无花果、锡盘与亚麻桌布。卡拉瓦乔式暗光，笔触可见，没有题字。"
+        },
+        {
+          "id": "en-kingfisher",
+          "title_zh": "翠鸟微距",
+          "title_en": "Kingfisher macro",
+          "prompt": "Macro photography of a small kingfisher perched on a mossy branch beside clear water, detailed blue feathers, droplets, natural sunlight, softly blurred forest background, realistic textures."
+        },
+        {
+          "id": "zh-flowers",
+          "title_zh": "一枝玉兰",
+          "title_en": "Single magnolia",
+          "prompt": "一只青瓷瓶里插着一枝玉兰，窗光从右侧进来，影子落在墙面。极简静物摄影，背景纯净，没有文字。"
+        }
+      ]
+    }
+  ],
+  "edit": [
+    {
+      "id": "edit-local",
+      "icon": "✎",
+      "zh": "局部修改",
+      "en": "Local edit",
+      "prompts": [
+        {
+          "id": "e-bg-beach",
+          "title_zh": "换成日落海滩",
+          "title_en": "Sunset beach background",
+          "prompt": "Change the background to a sunset beach. Keep the subject, pose, clothing and lighting identity. Do not add text."
+        },
+        {
+          "id": "e-sweater",
+          "title_zh": "只改毛衣颜色",
+          "title_en": "Recolor sweater only",
+          "prompt": "Change only the blue sweater to a red sweater. Preserve the same person, face, pose, lighting and background."
+        },
+        {
+          "id": "e-sky",
+          "title_zh": "天空改成晚霞",
+          "title_en": "Sunset sky",
+          "prompt": "Replace the daytime sky with a warm sunset, keep the ground, buildings and people unchanged, match the new lighting gently, no extra objects, no text."
+        },
+        {
+          "id": "e-season-winter",
+          "title_zh": "变成冬日",
+          "title_en": "Make it winter",
+          "prompt": "Turn this scene into a quiet winter day with light snow, keep the same composition and subjects, realistic snow accumulation, no text."
+        },
+        {
+          "id": "e-remove",
+          "title_zh": "移除指定物体",
+          "title_en": "Remove an object",
+          "prompt": "Remove the object I described, fill the area with a plausible continuation of the background, keep everything else identical, no text."
+        }
+      ]
+    },
+    {
+      "id": "edit-multi",
+      "icon": "☰",
+      "zh": "多图合成",
+      "en": "Multi-reference",
+      "prompts": [
+        {
+          "id": "e-campfire",
+          "title_zh": "围着篝火的合影",
+          "title_en": "Campfire group",
+          "prompt": "These people from the reference images are sitting around a campfire in a forest at dusk. Keep each person's identity, natural interaction, cinematic lighting, no text."
+        },
+        {
+          "id": "e-flowers-scene",
+          "title_zh": "把花放入场景",
+          "title_en": "Flowers into the scene",
+          "prompt": "Put the flowers from the first image into the second scene. Match perspective, scale and lighting. Keep the rest of the scene."
+        },
+        {
+          "id": "e-tryon",
+          "title_zh": "虚拟试穿",
+          "title_en": "Virtual try-on",
+          "prompt": "Dress the person from the first image in the clothing, shoes and accessories from the following reference images. Preserve the person's identity and a natural full-body pose, studio-quality, no extra logos."
+        },
+        {
+          "id": "e-interior-set",
+          "title_zh": "用家具生成房间",
+          "title_en": "Room from furniture",
+          "prompt": "Arrange the furniture and objects from these reference images into one coherent living room with natural daylight. Keep product identity, realistic scale, interior photography, no text."
+        },
+        {
+          "id": "e-group-studio",
+          "title_zh": "多肖像合成合影",
+          "title_en": "Group portrait from heads",
+          "prompt": "Create a single group photograph from these individual portraits. Match lighting, keep facial identity, standing together in a softly lit studio, waist-up, no text."
+        }
+      ]
+    },
+    {
+      "id": "edit-style",
+      "icon": "◐",
+      "zh": "风格与材质",
+      "en": "Style",
+      "prompts": [
+        {
+          "id": "e-oil",
+          "title_zh": "改成油画",
+          "title_en": "As oil painting",
+          "prompt": "Turn this into a classical oil painting with visible brushwork, keep composition and subject identity, museum lighting, no signature, no text."
+        },
+        {
+          "id": "e-night",
+          "title_zh": "改成夜晚",
+          "title_en": "Make it night",
+          "prompt": "Convert this daytime photo into a believable night scene with practical lights, keep architecture and layout, cinematic, no text."
+        },
+        {
+          "id": "e-clay",
+          "title_zh": "黏土模型风格",
+          "title_en": "Claymation look",
+          "prompt": "Restyle this as a miniature clay set, tactile fingerprints in the material, tilt-shift photography, keep the same story, no text."
+        },
+        {
+          "id": "e-line",
+          "title_zh": "干净线稿",
+          "title_en": "Clean line art",
+          "prompt": "Convert this into clean black line art on white, design-drawing style, keep the silhouette and important details, no shading text, no captions."
+        }
+      ]
+    },
+    {
+      "id": "edit-rgba",
+      "icon": "◇",
+      "zh": "抠图与透明",
+      "en": "Cutout",
+      "prompts": [
+        {
+          "id": "e-extract",
+          "title_zh": "提取主体为透明",
+          "title_en": "Extract subject RGBA",
+          "prompt": "This is an RGBA image with transparency. Extract the main subject from the reference photograph as a clean cutout. The image has alpha channel and the background is transparent."
+        },
+        {
+          "id": "e-sticker",
+          "title_zh": "变成贴纸",
+          "title_en": "Turn into a sticker",
+          "prompt": "This is an RGBA image with transparency. Turn the subject into a die-cut sticker with a thick white border and simplified colors. The image has alpha channel and the background is transparent."
+        },
+        {
+          "id": "e-keep-alpha",
+          "title_zh": "改表情保留透明底",
+          "title_en": "Edit, keep transparency",
+          "prompt": "This is an RGBA image with transparency. Change the subject's expression to a gentle smile, keep the transparent background and the same costume. The image has alpha channel and the background is transparent."
+        }
+      ]
+    },
+    {
+      "id": "edit-text",
+      "icon": "文",
+      "zh": "改字",
+      "en": "Text edit",
+      "prompts": [
+        {
+          "id": "e-replace-cn",
+          "title_zh": "替换中文标题",
+          "title_en": "Replace Chinese title",
+          "prompt": "Replace the main title text with exactly “IMGEN 工作室”, keep the original layout, fonts, materials and the rest of the poster, no extra words."
+        },
+        {
+          "id": "e-replace-en",
+          "title_zh": "替换英文标题",
+          "title_en": "Replace English title",
+          "prompt": "Replace the headline with exactly \"IMGEN STUDIO\". Keep the original layout, lighting and materials. Do not add other text."
+        },
+        {
+          "id": "e-fix-typo",
+          "title_zh": "修正错字并保持版式",
+          "title_en": "Fix lettering",
+          "prompt": "Keep the poster design identical, only correct the lettering so it is sharp and spelled as specified in my instruction. No additional captions."
+        }
+      ]
+    }
+  ]
+}

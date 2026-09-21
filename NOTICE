@@ -1,0 +1,35 @@
+IMGEN
+=====
+
+This software (the IMGEN application) is licensed under the MIT License.
+See LICENSE.
+
+Third-party model weights
+-------------------------
+
+Running IMGEN downloads and executes third-party model weights that are
+NOT covered by the MIT License of this repository:
+
+  * Qwen-Image-2.1
+    Hugging Face : https://huggingface.co/Qwen/Qwen-Image-2.1
+    ModelScope   : https://modelscope.cn/models/Qwen/Qwen-Image-2.1
+    License      : Qwen Research License
+                   Review the official LICENSE before use.
+
+  * Image21-INT8 (community bitsandbytes INT8 conversion by ixim)
+    Hugging Face : https://huggingface.co/ixim/Image21-INT8
+    ModelScope   : https://modelscope.cn/models/iximbox/Image21-INT8
+    License      : Qwen Research License (derivative of Qwen-Image-2.1)
+    Loader helper `imgen/int8_runtime.py` is adapted from
+    `ixim/Image21-INT8` `scripts/runtime.py` and retains the upstream
+    comments and behaviour.
+
+You are responsible for complying with those licenses, including any
+non-commercial or research-only restrictions.
+
+Other libraries
+---------------
+
+IMGEN depends on PyTorch, Hugging Face Diffusers / Transformers /
+Accelerate / Hub, ModelScope, bitsandbytes, FastAPI, Uvicorn, Pillow
+and others, each under their own licenses. See `requirements.txt`.

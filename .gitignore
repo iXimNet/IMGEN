@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Tools
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# App data (user-generated)
+.imgen/
+outputs/
+thumbs/
+refs/
+*.png
+*.jpg
+*.jpeg
+*.webp
+!imgen/static/**
+
+# Secrets
+.env
+.env.local
+*.token
+
+# Models / caches (never commit weights)
+models/
+.cache/
+huggingface/
+modelscope/
