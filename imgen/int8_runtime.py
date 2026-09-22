@@ -9,12 +9,66 @@ parent move. Keep CB aliases and SCB/outlier state colocated with the weight.
 This is instance-local; checkpoint tensors and installed packages are unchanged.
 """
 
+import logging
+import warnings
 from types import MethodType
 
-import torch
+_SILENCED = False
+_ORIG_WARN = warnings.warn
+_BF16_CAST_FILTER = r"MatMul8bitLt: inputs will be cast from .* to float16 during quantization"
+
+
+def _is_matmul8bit_cast_warning(message) -> bool:
+    text = message.args[0] if isinstance(message, BaseException) else str(message)
+    return "MatMul8bitLt:" in text and "float16" in text
+
+
+def _quiet_warn(*args, **kwargs):
+    message = args[0] if args else kwargs.get("message", "")
+    if _is_matmul8bit_cast_warning(message):
+        return None
+    return _ORIG_WARN(*args, **kwargs)
+
+
+def silence_int8_bf16_cast_warnings() -> None:
+    """bitsandbytes INT8 kernels take fp16 activations.
+
+    Image21-INT8 is loaded in bfloat16 (official recipe). MatMul8bitLt warns on
+    every layer / step unless this is silenced. Libraries often insert an
+    'always' UserWarning filter in front of a message match, so we also wrap
+    warnings.warn and the bitsandbytes-local `warn` alias.
+    """
+    global _SILENCED
+    warnings.filterwarnings("ignore", message=_BF16_CAST_FILTER)
+    warnings.filterwarnings("ignore", message=r"MatMul8bitLt:")
+    warnings.filterwarnings(
+        "ignore",
+        category=UserWarning,
+        module=r"bitsandbytes(\..*)?",
+    )
+    warnings.warn = _quiet_warn
+    if not _SILENCED:
+        logging.getLogger("py.warnings").addFilter(
+            lambda record: "MatMul8bitLt:" not in record.getMessage()
+        )
+    try:
+        import bitsandbytes.autograd._functions as bnb_fn
+
+        bnb_fn.warn = _quiet_warn
+        bnb_fn.warnings.warn = _quiet_warn
+    except Exception:
+        pass
+    try:
+        import bitsandbytes.research.autograd._functions as bnb_research
+
+        bnb_research.warnings.warn = _quiet_warn
+    except Exception:
+        pass
+    _SILENCED = True
 
 
 def patch_int8_device_moves(model):
+    import torch
     from bitsandbytes.nn import Linear8bitLt
 
     for layer in model.modules():
@@ -55,8 +109,11 @@ def enable_int8_cpu_offload(pipe):
 
 def load_int8_pipeline(model, local_files_only=False):
     """Load/offload components sequentially to avoid a combined CUDA load peak."""
+    import torch
     from diffusers import QwenImage21Pipeline, QwenImage21Transformer2DModel
     from transformers import Qwen3VLForConditionalGeneration
+
+    silence_int8_bf16_cast_warnings()
 
     components = {}
     for name, cls in [

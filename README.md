@@ -73,7 +73,7 @@ PyTorch is **not** pinned in `requirements.txt` because the wheel depends on you
 ### Windows (NVIDIA)
 
 ```powershell
-git clone https://github.com/YOUR_USER/imgen.git
+git clone https://github.com/iXimNet/imgen.git
 cd imgen
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -89,7 +89,7 @@ A helper script lives at `scripts/setup_windows.ps1`.
 ### macOS (Apple Silicon)
 
 ```bash
-git clone https://github.com/YOUR_USER/imgen.git
+git clone https://github.com/iXimNet/imgen.git
 cd imgen
 python3 -m venv .venv
 source .venv/bin/activate
@@ -131,7 +131,9 @@ Data lives in `~/.imgen/` (override with `IMGEN_HOME`):
   refs/
 ```
 
-Weights stay in the hub cache (`~/.cache/huggingface` or `~/.cache/modelscope`).
+Weights stay in the hub cache (`HF_HOME`, default `~/.cache/huggingface`, or ModelScope’s cache).
+
+If loading fails with a missing `*-00001-of-0000N.safetensors` file, the snapshot was interrupted: `model_index.json` is present but some shards are not. Open **Settings → download weights** (or run the first-run wizard again). IMGEN now treats that cache as incomplete and **resumes** only the missing shards. Evaluation images in the Image21-INT8 repo are skipped.
 
 ## Usage notes
 

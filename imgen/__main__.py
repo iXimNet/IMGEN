@@ -57,8 +57,15 @@ def _check() -> int:
     hub = cfg._data.get("hub") or "huggingface"
     print(f"hub      {hub}")
     for row in model_status(hub):
-        mark = "yes" if row["downloaded"] else "no"
-        print(f"model    {row['label']:18} downloaded={mark:3}  {row['repo']}")
+        if row["downloaded"]:
+            mark = "yes"
+        elif row.get("incomplete"):
+            mark = "incomplete"
+        else:
+            mark = "no"
+        print(f"model    {row['label']:18} downloaded={mark:11}  {row['repo']}")
+        if row.get("incomplete") and row.get("missing_files"):
+            print(f"         missing  {', '.join(row['missing_files'][:4])}")
     for warning in device.get("warnings") or []:
         print(f"note     {warning}")
     return 0
@@ -66,6 +73,9 @@ def _check() -> int:
 
 def main(argv: list[str] | None = None) -> int:
     _enable_windows_utf8()
+    from .int8_runtime import silence_int8_bf16_cast_warnings
+
+    silence_int8_bf16_cast_warnings()
     args = build_parser().parse_args(argv)
     if args.version:
         print(__version__)

@@ -21,8 +21,19 @@ def test_index_page(client):
     page = client.get("/")
     assert page.status_code == 200
     assert "IMGEN" in page.text
+    assert 'id="closeSettings"' in page.text
+    assert 'id="historyMore"' in page.text
+    assert "composer-scroll" in page.text
     css = client.get("/css/app.css")
     assert css.status_code == 200
+    assert "composer-scroll" in css.text
+    assert ".runbar" in css.text
+    js = client.get("/js/app.js")
+    assert js.status_code == 200
+    assert "openHistoryMore" in js.text
+    assert "h-more" in js.text
+    assert "kv-grid" in js.text
+    assert "kv-grid" in css.text
 
 
 def test_health_and_bootstrap(client):

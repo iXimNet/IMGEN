@@ -70,6 +70,9 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        from .int8_runtime import silence_int8_bf16_cast_warnings
+
+        silence_int8_bf16_cast_warnings()
         bus.bind_loop(asyncio.get_running_loop())
         yield
 
@@ -108,6 +111,8 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
         if engine.demo:
             for row in models:
                 row["downloaded"] = True
+                row["incomplete"] = False
+                row["missing_files"] = []
                 row["path"] = "(demo)"
         return {
             "app": APP_NAME,
@@ -160,6 +165,7 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
         if not download_lock.acquire(blocking=False):
             raise HTTPException(409, "A download is already running.")
         token = config.token_for(hub)
+        force = bool(payload.get("force"))
 
         if engine.demo:
             download_lock.release()
@@ -175,7 +181,7 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
 
         def _run() -> None:
             try:
-                path = download_model(model_key, hub, token=token, callback=emit)
+                path = download_model(model_key, hub, token=token, callback=emit, force=force)
                 emit({"type": "download_ok", "model_key": model_key, "hub": hub, "path": str(path)})
             except Exception as exc:
                 emit({"type": "error", "stage": "download", "message": str(exc)})

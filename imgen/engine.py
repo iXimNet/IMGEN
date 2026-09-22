@@ -25,6 +25,31 @@ from .sizes import follow_reference_size, output_resolution_for, size_for
 ProgressFn = Callable[[dict], None]
 
 
+def resolve_vae_tiling(vae_tiling, *, mode: str, output_resolution: int) -> bool:
+    """Official T2I does not tile. INT8 2048 editing documented tiling for VRAM."""
+    if vae_tiling in (None, "auto"):
+        return mode == "edit" and int(output_resolution) >= 1536
+    if isinstance(vae_tiling, str):
+        return vae_tiling.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(vae_tiling)
+
+
+def apply_vae_tiling(pipe, enabled: bool) -> None:
+    vae = getattr(pipe, "vae", None)
+    if vae is None:
+        return
+    if enabled:
+        if hasattr(vae, "enable_tiling"):
+            vae.enable_tiling()
+        else:
+            vae.use_tiling = True
+        return
+    if hasattr(vae, "disable_tiling"):
+        vae.disable_tiling()
+    elif hasattr(vae, "use_tiling"):
+        vae.use_tiling = False
+
+
 class EngineError(RuntimeError):
     def __init__(self, message: str, code: str = "ENGINE") -> None:
         super().__init__(message)
@@ -103,6 +128,18 @@ class Engine:
 
         path = model_local_path(model_key, hub)
         if path is None:
+            from .hub import find_snapshot_dir, missing_weight_files
+
+            found = find_snapshot_dir(model_key, hub)
+            if found:
+                missing = missing_weight_files(found)
+                preview = ", ".join(missing[:4])
+                extra = f" (+{len(missing) - 4} more)" if len(missing) > 4 else ""
+                raise EngineError(
+                    f"{spec['label']} is incomplete: missing {preview}{extra}. "
+                    "Open Settings and download again to resume the remaining shards.",
+                    "INCOMPLETE_WEIGHTS",
+                )
             raise EngineError(
                 f"{spec['label']} is not downloaded from {hub} yet.",
                 "NOT_DOWNLOADED",
@@ -165,6 +202,13 @@ class Engine:
         from .int8_runtime import load_int8_pipeline
 
         callback({"type": "load_stage", "stage": "int8_sequential"})
+        callback(
+            {
+                "type": "log",
+                "message": "Image21-INT8: bitsandbytes INT8 kernels cast bf16 activations to fp16. "
+                "This is expected and not an error.",
+            }
+        )
         return load_int8_pipeline(str(path), local_files_only=True)
 
     def generate(self, request: dict[str, Any], callback: ProgressFn | None = None) -> dict[str, Any]:
@@ -218,11 +262,11 @@ class Engine:
                 else DEFAULT_KV_CACHE
             )
             n_images = max(1, min(4, int(request.get("num_images") or 1)))
-            vae_tiling = request.get("vae_tiling")
-            if vae_tiling in (None, "auto"):
-                enable_tiling = output_resolution >= 1536 or (mode == "edit" and MODELS[model_key]["int8"])
-            else:
-                enable_tiling = bool(vae_tiling)
+            enable_tiling = resolve_vae_tiling(
+                request.get("vae_tiling"),
+                mode=mode,
+                output_resolution=output_resolution,
+            )
 
             if self.demo:
                 images = [
@@ -245,11 +289,11 @@ class Engine:
                 pipe = self._pipe
                 if pipe is None:
                     raise EngineError("Pipeline failed to load.", "LOAD_FAILED")
-                if enable_tiling and hasattr(pipe, "vae"):
-                    try:
-                        pipe.vae.enable_tiling()
-                    except Exception:
-                        pass
+                if MODELS[model_key].get("int8"):
+                    from .int8_runtime import silence_int8_bf16_cast_warnings
+
+                    silence_int8_bf16_cast_warnings()
+                apply_vae_tiling(pipe, enable_tiling)
                 callback({"type": "generate_start", "width": width, "height": height, "steps": steps})
                 images = self._run_pipe(
                     pipe,

@@ -39,6 +39,19 @@
     $("followRow").classList.toggle("hidden", state.mode !== "edit");
     $("refSection").classList.toggle("hidden", state.mode !== "edit");
     renderPresets();
+    renderHistory();
+    const closeLabel = tr("close");
+    ["closeSettingsX", "closeHistoryMoreX"].forEach((id) => {
+      if ($(id)) $(id).setAttribute("aria-label", closeLabel);
+    });
+  }
+
+  function esc(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
   }
 
   function toast(message, err) {
@@ -98,7 +111,14 @@
     }
     if (msg.type === "download_complete" || msg.type === "download_ok") {
       toast(tr("downloaded"));
-      refreshBootstrap().then(() => renderWizard());
+      refreshBootstrap().then(() => {
+        renderWizard();
+        const btn = $("settingsDownload");
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = tr("download");
+        }
+      });
     }
     if (msg.type === "job_complete") {
       state.jobId = msg.id;
@@ -109,6 +129,11 @@
     if (msg.type === "error") {
       setBusy(false);
       toast(msg.message || tr("failed"), true);
+      const btn = $("settingsDownload");
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = tr("download");
+      }
     }
     if (msg.type === "job_cancelled") {
       setBusy(false);
@@ -258,67 +283,140 @@
     const model = (state.bootstrap.models || []).find((m) => m.key === state.modelKey);
     const loaded = state.bootstrap.engine && state.bootstrap.engine.loaded;
     $("modelChip").innerHTML = `<strong>${model ? model.label : state.modelKey}</strong> · ${state.hub}`;
-    if (loaded && loaded.model_key === state.modelKey) $("modelChip").classList.add("ok");
+    $("modelChip").classList.toggle("warn", !!(model && model.incomplete));
+    $("modelChip").classList.toggle("ok", !!(loaded && loaded.model_key === state.modelKey));
     $("demoChip").classList.toggle("hidden", !state.bootstrap.demo);
   }
 
+  function fmt(value) {
+    if (value == null || value === "") return "—";
+    if (typeof value === "boolean") return value ? tr("on") : tr("off");
+    return String(value);
+  }
+
+  function historyBrief(item) {
+    const mode = item.mode === "edit" ? tr("edit") : tr("generate");
+    const size = item.width && item.height ? `${item.width}×${item.height}` : "";
+    const seed = item.seed != null ? `${tr("seed")} ${item.seed}` : "";
+    return [mode, size, seed].filter(Boolean).join(" · ");
+  }
+
+  function fmtTime(iso) {
+    if (!iso) return "";
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return iso;
+    const locale = state.lang === "zh" ? "zh-CN" : "en-US";
+    return date.toLocaleString(locale, {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+  }
+
+  function historyParamRows(item) {
+    const p = item.params || {};
+    const size = item.width && item.height ? `${item.width} × ${item.height}` : "";
+    return [
+      [tr("status"), item.status],
+      [tr("createdAt"), fmtTime(item.created_at)],
+      [tr("mode"), item.mode === "edit" ? tr("edit") : tr("generate")],
+      [tr("duration"), item.duration_ms ? (item.duration_ms / 1000).toFixed(1) + " s" : ""],
+      [tr("model"), item.model_key],
+      [tr("hub"), item.hub],
+      [`${tr("width")} × ${tr("height")}`, size],
+      [tr("aspect"), p.aspect],
+      [tr("scale"), p.scale],
+      [tr("outputRes"), p.output_resolution],
+      [tr("steps"), p.steps],
+      [tr("cfg"), p.true_cfg_scale],
+      [tr("seed"), item.seed],
+      [tr("nImages"), p.num_images],
+      [tr("kvCache"), p.use_kv_cache],
+      [tr("transparent"), p.transparent],
+      [tr("followRef"), p.follow_ref_aspect],
+      [tr("vaeTiling"), p.vae_tiling],
+    ];
+  }
+
   function renderHistory() {
+    const list = $("historyList");
+    if (!list || !state.history) return;
     const q = ($("historySearch").value || "").toLowerCase();
-    $("historyList").innerHTML = "";
+    list.innerHTML = "";
     const items = state.history.filter((h) => !q || (h.prompt || "").toLowerCase().includes(q));
     if (!items.length) {
-      $("historyList").innerHTML = `<p class="hint">${tr("emptyHistory")}</p>`;
+      list.innerHTML = `<p class="hint">${tr("emptyHistory")}</p>`;
       return;
     }
     items.forEach((item) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "h-item" + (state.selected === item.id ? " active" : "");
+      const row = document.createElement("div");
+      row.className = "h-item" + (state.selected === item.id ? " active" : "");
       const thumb = item.thumb_url || item.image_url;
-      btn.innerHTML = `
-        ${thumb ? `<img src="${thumb}" alt="" />` : "<div></div>"}
+      const title = (item.prompt || "").trim() || item.id;
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "h-card";
+      card.innerHTML = `
+        ${thumb ? `<img src="${esc(thumb)}" alt="" />` : `<div class="h-ph"></div>`}
         <div class="meta">
-          <b>${(item.prompt || "").slice(0, 72) || item.id}</b>
-          ${item.mode} · ${item.model_key} · ${item.width || "?"}×${item.height || "?"}
+          <b title="${esc(title)}">${esc(title)}</b>
+          <div class="brief">${esc(historyBrief(item))}</div>
         </div>`;
-      btn.onclick = () => selectHistory(item);
-      $("historyList").appendChild(btn);
+      card.onclick = () => selectHistory(item);
+      const more = document.createElement("button");
+      more.type = "button";
+      more.className = "ghost h-more";
+      more.textContent = tr("more");
+      more.onclick = (event) => {
+        event.stopPropagation();
+        openHistoryMore(item);
+      };
+      row.appendChild(card);
+      row.appendChild(more);
+      list.appendChild(row);
     });
   }
 
   function selectHistory(item) {
     state.selected = item.id;
     if (item.image_url) showResult(item.image_url);
-    const p = item.params || {};
-    const rows = [
-      ["mode", item.mode],
-      ["model", item.model_key],
-      ["hub", item.hub],
-      ["seed", item.seed],
-      ["size", `${item.width}×${item.height}`],
-      ["steps", p.steps],
-      ["CFG", p.true_cfg_scale],
-      ["KV", p.use_kv_cache],
-      [tr("duration"), item.duration_ms ? (item.duration_ms / 1000).toFixed(1) + "s" : ""],
-      ["status", item.status],
-    ];
-    $("historyDetail").classList.remove("hidden");
-    $("historyDetail").innerHTML = `
-      <div class="kv">${rows
-        .map(([k, v]) => `<b>${k}</b><span>${v == null || v === "" ? "—" : v}</span>`)
-        .join("")}</div>
-      <p style="margin-top:10px">${(item.prompt || "").replace(/</g, "&lt;")}</p>
-      <div style="display:flex;gap:8px;margin-top:10px">
-        <button type="button" class="ghost" id="histReuse">${tr("reuse")}</button>
-        <button type="button" class="btn-danger ghost" id="histDel">${tr("delete")}</button>
-      </div>`;
-    $("histReuse").onclick = () => reuse(item);
+    renderHistory();
+  }
+
+  function openHistoryMore(item) {
+    selectHistory(item);
+    const thumb = item.thumb_url || item.image_url;
+    const cells = historyParamRows(item)
+      .map(
+        ([k, v]) =>
+          `<div class="kv-cell"><span class="k">${esc(k)}</span><span class="v">${esc(fmt(v))}</span></div>`
+      )
+      .join("");
+    const negative = item.negative_prompt || (item.params || {}).negative_prompt || "";
+    const negHtml = negative
+      ? `<div class="kv-cell span-2"><span class="k">${esc(tr("negative"))}</span><span class="v">${esc(fmt(negative))}</span></div>`
+      : "";
+    $("historyMoreBody").innerHTML = `
+      ${thumb ? `<img class="sheet-preview" src="${esc(item.image_url || thumb)}" alt="" />` : ""}
+      <div class="kv-grid">${cells}${negHtml}</div>
+      <div class="prompt-label">${esc(tr("prompt"))}</div>
+      <div class="prompt-block">${esc(item.prompt || "")}</div>`;
+    $("histReuse").onclick = () => {
+      reuse(item);
+      $("historyMore").close();
+    };
     $("histDel").onclick = async () => {
       if (!confirm(tr("confirmDelete"))) return;
       await api("/api/jobs/" + item.id, { method: "DELETE" });
+      $("historyMore").close();
+      if (state.selected === item.id) state.selected = null;
       loadHistory();
     };
-    renderHistory();
+    $("historyMore").showModal();
   }
 
   function reuse(item) {
@@ -445,8 +543,9 @@
         btn.type = "button";
         btn.className = "choice" + (state.modelKey === m.key ? " active" : "");
         const note = state.lang === "zh" ? m.notes_zh : m.notes_en;
+        const status = m.downloaded ? tr("downloaded") : m.incomplete ? tr("incomplete") : m.repo;
         btn.innerHTML = `<b>${m.label} · ${m.precision}</b>
-          <p>${tr("approx")} ${m.approx_gb} ${tr("gb")} · ${m.downloaded ? tr("downloaded") : m.repo}</p>
+          <p>${tr("approx")} ${m.approx_gb} ${tr("gb")} · ${status}</p>
           <p>${note}</p>`;
         btn.onclick = () => {
           state.modelKey = m.key;
@@ -462,9 +561,9 @@
         <p class="hint">${model ? model.label : ""} · ${state.hub} · ${tr("approx")} ${model ? model.approx_gb : "?"} ${tr("gb")}</p>
         <div class="field"><label>${tr("hfToken")}</label><input id="wizHf" type="password" value="" /></div>
         <div class="field"><label>${tr("msToken")}</label><input id="wizMs" type="password" value="" /></div>
-        <p class="dl-log hint">${model && model.downloaded ? tr("downloaded") : ""}</p>
+        <p class="dl-log hint">${model && model.downloaded ? tr("downloaded") : model && model.incomplete ? tr("incomplete") : ""}</p>
         <div class="seg" style="margin-top:12px">
-          <button type="button" class="btn-gold" id="wizDl">${model && model.downloaded ? tr("skip") : tr("download")}</button>
+          <button type="button" class="btn-gold" id="wizDl">${model && model.downloaded ? tr("skip") : model && model.incomplete ? tr("resumeDownload") : tr("download")}</button>
         </div>
         <p class="hint">${tr("licenseNote")}</p>`;
       $("wizDl").onclick = async () => {
@@ -601,7 +700,47 @@
     on($("openSettings"), "click", () => {
       $("setHub").value = state.hub;
       $("setModel").value = state.modelKey;
+      const model = (state.bootstrap.models || []).find((m) => m.key === state.modelKey);
+      const status = $("settingsModelStatus");
+      if (status) {
+        if (model && model.incomplete) {
+          status.textContent = tr("incomplete") + (model.missing_files || []).slice(0, 3).join(" · ");
+        } else if (model && model.downloaded) {
+          status.textContent = tr("downloaded");
+        } else {
+          status.textContent = "";
+        }
+      }
       $("settings").showModal();
+    });
+    on($("settingsDownload"), "click", async () => {
+      const btn = $("settingsDownload");
+      btn.disabled = true;
+      btn.textContent = tr("downloading");
+      try {
+        await api("/api/models/download", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model_key: $("setModel").value || state.modelKey,
+            hub: $("setHub").value || state.hub,
+          }),
+        });
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = tr("download");
+        toast(err.message, true);
+      }
+    });
+    const closeSettings = () => $("settings").close();
+    on($("closeSettings"), "click", closeSettings);
+    on($("closeSettingsX"), "click", closeSettings);
+    on($("closeHistoryMore"), "click", () => $("historyMore").close());
+    on($("closeHistoryMoreX"), "click", () => $("historyMore").close());
+    ["settings", "historyMore"].forEach((id) => {
+      on($(id), "click", (event) => {
+        if (event.target === $(id)) $(id).close();
+      });
     });
     on($("saveSettings"), "click", async (e) => {
       e.preventDefault();
