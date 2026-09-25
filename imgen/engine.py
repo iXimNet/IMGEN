@@ -145,8 +145,8 @@ class Engine:
         device = self.device_info
         if spec["requires_cuda"] and not device.get("cuda"):
             raise EngineError(
-                "Image21-INT8 requires an NVIDIA CUDA GPU and bitsandbytes. "
-                "On macOS or CPU-only machines, use Qwen-Image-2.1.",
+                f"{spec['label']} requires an NVIDIA CUDA GPU and bitsandbytes. "
+                "On macOS or CPU-only machines, use Qwen-Image-2.1 or Image21-INT4.",
                 "CUDA_REQUIRED",
             )
         if self.demo:
@@ -191,6 +191,9 @@ class Engine:
             if spec["loader"] == "int8":
                 pipe = self._load_int8(path, callback)
                 offload = True
+            elif spec["loader"] == "int4":
+                pipe = self._load_int4(path, callback)
+                offload = pipe.image21_runtime["offload"] != "resident"
             else:
                 pipe = self._load_bf16(path, callback)
                 offload = self._should_offload()
@@ -208,6 +211,8 @@ class Engine:
                 "loader": spec["loader"],
                 "cpu_offload": offload,
             }
+            if spec["loader"] == "int4":
+                self._loaded["runtime"] = dict(pipe.image21_runtime)
             callback({"type": "load_complete", **self._loaded})
             return self._loaded
 
@@ -244,6 +249,23 @@ class Engine:
             }
         )
         return load_int8_pipeline(str(path), local_files_only=True)
+
+    def _load_int4(self, path, callback: ProgressFn):
+        from .int4_runtime import load_int4_pipeline
+
+        callback({"type": "load_stage", "stage": "int4_sdnq"})
+        pipe = load_int4_pipeline(
+            str(path), device=self.device_info.get("device") or "cpu", local_files_only=True
+        )
+        runtime = pipe.image21_runtime
+        callback({
+            "type": "log",
+            "message": (
+                f"Image21-INT4: SDNQ UINT4 on {runtime['device']}, "
+                f"{runtime['offload']} offload, {runtime['dtype']}."
+            ),
+        })
+        return pipe
 
     def generate(self, request: dict[str, Any], callback: ProgressFn | None = None) -> dict[str, Any]:
         callback = callback or (lambda _e: None)

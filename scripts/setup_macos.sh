@@ -17,5 +17,6 @@ pip install -r requirements.txt
 
 echo
 echo "Image21-INT8 requires NVIDIA CUDA and is not available on macOS."
+echo "Optional INT4 extra (CUDA / MPS / CPU): pip install -r requirements-int4.txt"
 echo "Start the studio:     python -m imgen"
 echo "UI only, no weights:  python -m imgen --demo"

@@ -1,4 +1,4 @@
-"""Download Qwen-Image-2.1 / Image21-INT8 from Hugging Face or ModelScope."""
+"""Download BF16 / Image21-INT8 / Image21-INT4 from Hugging Face or ModelScope."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from .constants import HUBS, MODELS, repo_id
 
 ProgressFn = Callable[[dict], None]
 
-# Image21-INT8 ships a large evaluation gallery. Skip it so weight shards
+# The community checkpoints ship large evaluation galleries. Skip them so weight shards
 # are the files that actually get downloaded.
 HF_IGNORE_PATTERNS = [
     "evaluation/**",

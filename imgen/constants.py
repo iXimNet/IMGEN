@@ -93,6 +93,31 @@ MODELS: dict[str, dict] = {
         "requires_cuda": True,
         "int8": True,
     },
+    "image21-int4": {
+        "key": "image21-int4",
+        "label": "Image21-INT4",
+        "precision": "INT4",
+        "loader": "int4",
+        "approx_gb": 13.4,
+        "repos": {
+            "huggingface": "ixim/Image21-INT4",
+            "modelscope": "iximbox/Image21-INT4",
+        },
+        "urls": {
+            "huggingface": "https://huggingface.co/ixim/Image21-INT4",
+            "modelscope": "https://modelscope.cn/models/iximbox/Image21-INT4",
+        },
+        "notes_zh": (
+            "ixim 社区 SDNQ UINT4 转换。支持 CUDA、Apple Silicon MPS 和 CPU。"
+            "小显存 CUDA 自动分组卸载；MPS 建议 24GB 统一内存。"
+        ),
+        "notes_en": (
+            "Community SDNQ UINT4 conversion by ixim. CUDA, Apple Silicon MPS, or CPU. "
+            "Small CUDA GPUs use group offload; 24GB unified memory suggested for MPS."
+        ),
+        "requires_cuda": False,
+        "int8": False,
+    },
 }
 
 HUBS = {

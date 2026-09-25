@@ -43,6 +43,7 @@ dependencies = [
 
 [project.optional-dependencies]
 int8 = ["bitsandbytes>=0.45"]
+int4 = ["sdnq==0.2.7", "accelerate>=1.15.0"]
 dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [project.scripts]

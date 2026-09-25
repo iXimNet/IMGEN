@@ -1,0 +1,6 @@
+# Extra runtime for Image21-INT4 (CUDA, Apple Silicon MPS, or CPU).
+# Install a platform-appropriate PyTorch wheel first; upstream tested torch 2.10.
+# SDNQ 0.2.7 matches the saved UINT4 checkpoint. No bitsandbytes required.
+-r requirements.txt
+sdnq==0.2.7
+accelerate>=1.15.0

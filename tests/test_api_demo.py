@@ -56,7 +56,9 @@ def test_health_and_bootstrap(client):
     boot = client.get("/api/bootstrap").json()
     assert boot["prompts"]["counts"]["generate_prompts"] >= 70
     assert boot["sizes"]["2k"]["1:1"] == [2048, 2048]
-    assert {row["key"] for row in boot["models"]} == {"qwen-image-2.1", "image21-int8"}
+    assert {row["key"] for row in boot["models"]} == {
+        "qwen-image-2.1", "image21-int8", "image21-int4",
+    }
 
 
 def test_default_scale_is_1k(client):
@@ -133,13 +135,14 @@ def test_scale_labels_and_weight_notes_are_descriptive(client):
     assert "leave VAE tiling off" in int8["notes_en"]
 
 
-def test_demo_generate_and_history(client):
+@pytest.mark.parametrize("model_key", ["qwen-image-2.1", "image21-int4"])
+def test_demo_generate_and_history(client, model_key):
     response = client.post(
         "/api/jobs",
         data={
             "mode": "generate",
             "prompt": "a ceramic teapot on a wooden table",
-            "model_key": "qwen-image-2.1",
+            "model_key": model_key,
             "hub": "huggingface",
             "scale": "1k",
             "aspect": "1:1",
@@ -160,6 +163,7 @@ def test_demo_generate_and_history(client):
 
         time.sleep(0.05)
     assert item["status"] == "succeeded"
+    assert item["model_key"] == model_key
     assert item["seed"] == 42
     image = client.get(f"/api/outputs/{job_id}")
     assert image.status_code == 200
@@ -190,7 +194,8 @@ def test_demo_edit_requires_image(client):
     assert item["status"] == "failed"
 
 
-def test_demo_edit_with_reference(client):
+@pytest.mark.parametrize("model_key", ["qwen-image-2.1", "image21-int4"])
+def test_demo_edit_with_reference(client, model_key):
     buf = BytesIO()
     Image.new("RGB", (64, 64), (12, 80, 160)).save(buf, format="PNG")
     buf.seek(0)
@@ -199,7 +204,7 @@ def test_demo_edit_with_reference(client):
         data={
             "mode": "edit",
             "prompt": "Change the background to a sunset beach",
-            "model_key": "qwen-image-2.1",
+            "model_key": model_key,
             "hub": "huggingface",
             "scale": "1k",
             "steps": "8",

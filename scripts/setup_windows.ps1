@@ -18,5 +18,6 @@ pip install -r requirements.txt
 
 Write-Host ""
 Write-Host "Optional INT8 extra (Image21-INT8):  pip install -r requirements-int8.txt"
+Write-Host "Optional INT4 extra (Image21-INT4):  pip install -r requirements-int4.txt"
 Write-Host "Start the studio:                   python -m imgen"
 Write-Host "UI only, no weights:                python -m imgen --demo"

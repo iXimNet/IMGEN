@@ -58,25 +58,25 @@ def probe() -> dict[str, Any]:
         vram = info["vram_gb"] or 0
         if vram and vram < 12:
             info["warnings"].append(
-                "Less than 12 GiB VRAM. Prefer Image21-INT8, 1K resolution, and CPU offload."
+                "Less than 12 GiB VRAM. Prefer Image21-INT4 at 1K with automatic CPU offload."
             )
-        info["recommendations"].extend(["image21-int8", "qwen-image-2.1"])
+        info["recommendations"].extend(["image21-int4", "image21-int8", "qwen-image-2.1"])
     elif mps:
         info["device"] = "mps"
         info["device_name"] = "Apple Silicon (MPS)"
         info["bf16"] = True
         info["int8_ready"] = False
         info["warnings"].append(
-            "Image21-INT8 uses bitsandbytes and requires NVIDIA CUDA. Use Qwen-Image-2.1 on macOS."
+            "Image21-INT8 requires NVIDIA CUDA. On macOS use Image21-INT4 or Qwen-Image-2.1."
         )
-        info["recommendations"].append("qwen-image-2.1")
+        info["recommendations"].extend(["image21-int4", "qwen-image-2.1"])
     else:
         info["device"] = "cpu"
         info["device_name"] = "CPU"
         info["warnings"].append(
             "No CUDA or MPS device detected. CPU inference is technically possible but extremely slow."
         )
-        info["recommendations"].append("qwen-image-2.1")
+        info["recommendations"].extend(["image21-int4", "qwen-image-2.1"])
     return info
 
 

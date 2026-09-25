@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from imgen.constants import repo_id
 from imgen.hub import (
     hub_cache_root,
@@ -121,25 +123,27 @@ def test_zero_byte_shard_counts_as_missing(tmp_path):
     assert any("00001-of-00002" in item for item in missing)
 
 
-def test_modelscope_hub_models_layout_is_discovered(tmp_path, monkeypatch):
+@pytest.mark.parametrize("model_key", ["image21-int8", "image21-int4"])
+def test_modelscope_hub_models_layout_is_discovered(tmp_path, monkeypatch, model_key):
     """ModelScope stores snapshots under `hub/models/<namespace>/<name>`."""
     _isolate_caches(tmp_path, monkeypatch)
-    repo = repo_id("image21-int8", "modelscope")
+    repo = repo_id(model_key, "modelscope")
     snap = _complete_snapshot(tmp_path / "modelscope" / "hub" / "models" / repo)
 
-    state = hub_snapshot_state("image21-int8", "modelscope")
+    state = hub_snapshot_state(model_key, "modelscope")
 
     assert state["complete"] is True
     assert state["path"] == snap
 
 
-def test_resolve_local_hub_falls_back_to_the_other_source(tmp_path, monkeypatch):
+@pytest.mark.parametrize("model_key", ["image21-int8", "image21-int4"])
+def test_resolve_local_hub_falls_back_to_the_other_source(tmp_path, monkeypatch, model_key):
     """Weights from one hub must stay usable while the studio points at the other."""
     _isolate_caches(tmp_path, monkeypatch)
-    _complete_snapshot(_hf_snapshot(tmp_path, "image21-int8"))
+    _complete_snapshot(_hf_snapshot(tmp_path, model_key))
 
-    assert resolve_local_hub("image21-int8", "huggingface") == "huggingface"
-    assert resolve_local_hub("image21-int8", "modelscope") == "huggingface"
+    assert resolve_local_hub(model_key, "huggingface") == "huggingface"
+    assert resolve_local_hub(model_key, "modelscope") == "huggingface"
     assert resolve_local_hub("qwen-image-2.1", "huggingface") is None
 
 
