@@ -37,6 +37,10 @@ refs/
 *.webp
 !imgen/static/**
 
+# Local agent workspace: design iterations, verification scripts, screenshots.
+# Never part of the app; can be tens of MB.
+.workbuddy/
+
 # Secrets
 .env
 .env.local

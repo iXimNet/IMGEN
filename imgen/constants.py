@@ -21,6 +21,10 @@ DEFAULT_OUTPUT_RESOLUTION_2K = 2048
 DEFAULT_OUTPUT_RESOLUTION_1K = 1024
 DEFAULT_NUM_IMAGES = 1
 
+# Image21-INT8 errata (2026-09-24): its earlier general 2048px recommendation was
+# withdrawn in favour of a 1024px area scale, so 1K is what the studio opens on.
+DEFAULT_SCALE = "1k"
+
 # Native 2K sizes published by Qwen.
 ASPECT_RATIOS_2K: dict[str, tuple[int, int]] = {
     "1:1": (2048, 2048),
@@ -84,8 +88,8 @@ MODELS: dict[str, dict] = {
             "huggingface": "https://huggingface.co/ixim/Image21-INT8",
             "modelscope": "https://modelscope.cn/models/iximbox/Image21-INT8",
         },
-        "notes_zh": "ixim 社区 bitsandbytes INT8 转换。仅 NVIDIA CUDA。改图请使用 2048 并开启 VAE Tiling。",
-        "notes_en": "Community bitsandbytes INT8 conversion by ixim. NVIDIA CUDA only. Edit at 2048 with VAE tiling.",
+        "notes_zh": "ixim 社区 bitsandbytes INT8 转换。仅 NVIDIA CUDA。改图建议从 1024px 起，VAE Tiling 保持关闭。",
+        "notes_en": "Community bitsandbytes INT8 conversion by ixim. NVIDIA CUDA only. Start edits at 1024px and leave VAE tiling off.",
         "requires_cuda": True,
         "int8": True,
     },
@@ -110,18 +114,24 @@ HUBS = {
     },
 }
 
+# Labels stay descriptive, never advisory: the Image21-INT8 card withdrew its
+# earlier general 2048px recommendation, so the studio does not endorse a size.
 RESOLUTION_SCALES = {
     "2k": {
         "key": "2k",
-        "label_zh": "原生 2K（官方推荐）",
-        "label_en": "Native 2K (official)",
+        "label_zh": "原生 2K",
+        "label_en": "Native 2K",
+        "note_zh": "",
+        "note_en": "",
         "output_resolution": DEFAULT_OUTPUT_RESOLUTION_2K,
         "table": ASPECT_RATIOS_2K,
     },
     "1k": {
         "key": "1k",
-        "label_zh": "1K（更省显存）",
-        "label_en": "1K (lower VRAM)",
+        "label_zh": "1K",
+        "label_en": "1K",
+        "note_zh": "更省显存",
+        "note_en": "lower VRAM",
         "output_resolution": DEFAULT_OUTPUT_RESOLUTION_1K,
         "table": ASPECT_RATIOS_1K,
     },

@@ -18,7 +18,7 @@ DEFAULTS: dict[str, Any] = {
     "ms_token": "",
     "open_browser": True,
     "cpu_offload": "auto",
-    "vae_tiling": "auto",
+    "vae_tiling": "off",
     "last_params": {},
 }
 
@@ -39,6 +39,10 @@ class ConfigStore:
                     self._data = merged
             except (OSError, json.JSONDecodeError):
                 self._data = deepcopy(DEFAULTS)
+        # `vae_tiling: auto` used to mean "tile 2K edits". That recipe was
+        # withdrawn, so retire the stored value instead of carrying a dead one.
+        if str(self._data.get("vae_tiling") or "").strip().lower() == "auto":
+            self._data["vae_tiling"] = "off"
         return deepcopy(self._data)
 
     def save(self, patch: dict[str, Any] | None = None) -> dict[str, Any]:

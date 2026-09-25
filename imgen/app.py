@@ -21,6 +21,7 @@ from . import __version__
 from .config import ConfigStore
 from .constants import (
     APP_NAME,
+    DEFAULT_SCALE,
     HUBS,
     MAX_REFERENCE_IMAGES,
     MAX_UPLOAD_BYTES,
@@ -31,7 +32,7 @@ from .device import probe
 from .engine import Engine, EngineError
 from .events import EventBus
 from .history import History, new_id
-from .hub import download_model, model_status
+from .hub import download_model, hub_storage, model_status, resolve_local_hub
 from .paths import AppPaths
 from .prompts import catalog as prompt_catalog
 from .sizes import catalog as size_catalog
@@ -53,6 +54,25 @@ def _read_image(data: bytes, filename: str) -> Image.Image:
     image = Image.open(BytesIO(data))
     image.load()
     return image
+
+
+def _public_job(item: dict[str, Any]) -> dict[str, Any]:
+    """Drop local filesystem paths; expose only URLs the browser can fetch.
+
+    The detail view needs the reference-image count, so it is surfaced as
+    ``ref_count`` plus ready-made ``ref_urls`` instead of leaking absolute
+    paths on disk.
+    """
+    refs = item.pop("ref_paths", None) or []
+    has_image = bool(item.get("image_path") or item.get("thumb_path"))
+    item.pop("image_path", None)
+    item.pop("thumb_path", None)
+    job_id = item["id"]
+    item["image_url"] = f"/api/outputs/{job_id}" if has_image else None
+    item["thumb_url"] = f"/api/thumbs/{job_id}" if has_image else None
+    item["ref_count"] = len(refs)
+    item["ref_urls"] = [f"/api/refs/{job_id}/{index}" for index in range(len(refs))]
+    return item
 
 
 def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
@@ -111,8 +131,14 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
         if engine.demo:
             for row in models:
                 row["downloaded"] = True
+                row["downloaded_any"] = True
+                row["available_hubs"] = [hub]
+                row["local_hub"] = hub
                 row["incomplete"] = False
+                row["incomplete_any"] = False
+                row["incomplete_hubs"] = []
                 row["missing_files"] = []
+                row["missing_count"] = 0
                 row["path"] = "(demo)"
         return {
             "app": APP_NAME,
@@ -125,6 +151,11 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
             "model_catalog": MODELS,
             "sizes": size_catalog(),
             "prompts": prompt_catalog(),
+            "storage": {
+                "hub_dirs": {key: hub_storage(key) for key in HUBS},
+                "outputs": str(paths.outputs),
+                "home": str(paths.home),
+            },
             "engine": engine.status(),
             "defaults": {
                 "negative_placeholder": NEGATIVE_PROMPT_PLACEHOLDER,
@@ -195,6 +226,7 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
     def api_load(payload: dict[str, Any]) -> dict[str, Any]:
         model_key = payload.get("model_key") or config._data.get("model_key")
         hub = payload.get("hub") or config._data.get("hub") or "huggingface"
+        hub = resolve_local_hub(model_key, hub) or hub
         try:
             loaded = engine.load(model_key, hub, callback=emit)
         except EngineError as exc:
@@ -214,7 +246,7 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
         negative_prompt: str = Form(""),
         model_key: str = Form(""),
         hub: str = Form(""),
-        scale: str = Form("2k"),
+        scale: str = Form(DEFAULT_SCALE),
         aspect: str = Form("1:1"),
         width: int = Form(0),
         height: int = Form(0),
@@ -233,7 +265,10 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
             raise HTTPException(409, "A job is already running.")
         cfg = config.load()
         model_key = model_key or cfg.get("model_key") or "qwen-image-2.1"
-        hub = hub or cfg.get("hub") or "huggingface"
+        requested_hub = hub or cfg.get("hub") or "huggingface"
+        # The weights may already be on disk from the other source. Use them
+        # rather than refusing to run while the file sits right there.
+        hub = resolve_local_hub(model_key, requested_hub) or requested_hub
         refs: list[Image.Image] = []
         for upload in (files or [])[:MAX_REFERENCE_IMAGES]:
             data = await upload.read()
@@ -282,6 +317,15 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
             }
         )
         emit({"type": "job_queued", "id": job_id})
+        if hub != requested_hub:
+            emit(
+                {
+                    "type": "log",
+                    "job_id": job_id,
+                    "message": f"{model_key}: using weights from {hub} "
+                    f"({requested_hub} has no local copy).",
+                }
+            )
 
         def _run() -> None:
             try:
@@ -338,20 +382,17 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
 
     @app.get("/api/jobs")
     def list_jobs(limit: int = 80, offset: int = 0, q: str = "") -> dict[str, Any]:
-        items = history.list(limit=limit, offset=offset, query=q)
-        for item in items:
-            item["image_url"] = f"/api/outputs/{item['id']}" if item.get("image_path") else None
-            item["thumb_url"] = f"/api/thumbs/{item['id']}" if item.get("thumb_path") else None
-        return {"items": items}
+        items = [_public_job(item) for item in history.list(limit=limit, offset=offset, query=q)]
+        # `total` lets the browser know whether another page exists without
+        # guessing from the page size.
+        return {"items": items, "total": history.count(query=q), "offset": offset, "limit": limit}
 
     @app.get("/api/jobs/{job_id}")
     def get_job(job_id: str) -> dict[str, Any]:
         item = history.get(job_id)
         if not item:
             raise HTTPException(404, "Job not found.")
-        item["image_url"] = f"/api/outputs/{item['id']}" if item.get("image_path") else None
-        item["thumb_url"] = f"/api/thumbs/{item['id']}" if item.get("thumb_path") else None
-        return item
+        return _public_job(item)
 
     @app.delete("/api/jobs/{job_id}")
     def delete_job(job_id: str) -> dict[str, Any]:

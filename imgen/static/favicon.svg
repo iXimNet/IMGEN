@@ -1,7 +1,29 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="16" fill="#111318"/>
-  <rect x="1.5" y="1.5" width="61" height="61" rx="14.5" fill="none" stroke="#e4b85c" stroke-opacity=".35"/>
-  <circle cx="32" cy="32" r="14" fill="none" stroke="#e4b85c" stroke-width="2.4"/>
-  <circle cx="32" cy="32" r="5.5" fill="#e4b85c"/>
-  <path d="M18 18h6M18 18v6" fill="none" stroke="#f3efe6" stroke-width="2" stroke-linecap="square" opacity=".55"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <!-- Aperture ring around a safelight core — the same mark as the top bar
+       (#i-brand), but with ticks limited to the four cardinal directions: at
+       16px the 8-tick version turns to mush. -->
+  <defs>
+    <linearGradient id="t" x1="0" y1="0" x2=".4" y2="1">
+      <stop offset="0" stop-color="#3a4048"/><stop offset="1" stop-color="#111316"/>
+    </linearGradient>
+    <radialGradient id="g" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#f0a043" stop-opacity=".5"/>
+      <stop offset=".65" stop-color="#f0a043" stop-opacity=".12"/>
+      <stop offset="1" stop-color="#f0a043" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="c" cx=".42" cy=".35" r=".72">
+      <stop offset="0" stop-color="#fff1d6"/><stop offset=".45" stop-color="#f7b566"/>
+      <stop offset="1" stop-color="#d4832c"/>
+    </radialGradient>
+  </defs>
+  <rect width="48" height="48" rx="12" fill="url(#t)"/>
+  <rect x=".75" y=".75" width="46.5" height="46.5" rx="11.25" fill="none"
+        stroke="#f0a043" stroke-opacity=".32" stroke-width="1.5"/>
+  <circle cx="24" cy="24" r="18" fill="url(#g)"/>
+  <circle cx="24" cy="24" r="13.4" fill="none" stroke="#f0a043" stroke-opacity=".62" stroke-width="2.4"/>
+  <g stroke="#f0a043" stroke-opacity=".46" stroke-width="2.2" stroke-linecap="round">
+    <line x1="24" y1="9.6" x2="24" y2="15.2"/><line x1="24" y1="32.8" x2="24" y2="38.4"/>
+    <line x1="9.6" y1="24" x2="15.2" y2="24"/><line x1="32.8" y1="24" x2="38.4" y2="24"/>
+  </g>
+  <circle cx="24" cy="24" r="6.4" fill="url(#c)"/>
 </svg>

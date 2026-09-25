@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .constants import ASPECT_RATIOS_1K, ASPECT_RATIOS_2K, RESOLUTION_SCALES
+from .constants import ASPECT_RATIOS_1K, ASPECT_RATIOS_2K, DEFAULT_SCALE, RESOLUTION_SCALES
 
 
 def snap32(value: int) -> int:
@@ -27,21 +27,29 @@ def output_resolution_for(scale: str) -> int:
     return int(RESOLUTION_SCALES[scale]["output_resolution"])
 
 
-def follow_reference_size(scale: str, ref_width: int, ref_height: int) -> tuple[int, int]:
-    output_resolution = output_resolution_for(scale)
+def follow_reference_size(output_resolution: int, ref_width: int, ref_height: int) -> tuple[int, int]:
+    """Reference area is the side length squared, keeping the reference's ratio.
+
+    Takes the resolved area directly (not a scale key) so the studio's readout
+    and the engine compute the same size from the same input.
+    """
     ratio = ref_width / max(ref_height, 1)
-    return calculate_dimensions(output_resolution * output_resolution, ratio)
+    side = int(output_resolution)
+    return calculate_dimensions(side * side, ratio)
 
 
 def catalog() -> dict:
     return {
         "2k": ASPECT_RATIOS_2K,
         "1k": ASPECT_RATIOS_1K,
+        "default_scale": DEFAULT_SCALE,
         "scales": {
             key: {
                 "key": spec["key"],
                 "label_zh": spec["label_zh"],
                 "label_en": spec["label_en"],
+                "note_zh": spec["note_zh"],
+                "note_en": spec["note_en"],
                 "output_resolution": spec["output_resolution"],
                 "sizes": spec["table"],
             }

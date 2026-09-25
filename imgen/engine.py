@@ -13,6 +13,7 @@ from PIL import Image, ImageDraw, ImageFont
 from .constants import (
     DEFAULT_CFG,
     DEFAULT_KV_CACHE,
+    DEFAULT_SCALE,
     DEFAULT_STEPS,
     MAX_REFERENCE_IMAGES,
     MODELS,
@@ -25,11 +26,18 @@ from .sizes import follow_reference_size, output_resolution_for, size_for
 ProgressFn = Callable[[dict], None]
 
 
-def resolve_vae_tiling(vae_tiling, *, mode: str, output_resolution: int) -> bool:
-    """Official T2I does not tile. INT8 2048 editing documented tiling for VRAM."""
-    if vae_tiling in (None, "auto"):
-        return mode == "edit" and int(output_resolution) >= 1536
+def resolve_vae_tiling(vae_tiling) -> bool:
+    """Tiling is a VRAM tradeoff, never a quality win, so it stays opt-in.
+
+    The Image21-INT8 card traced short vertical stains at 2048px to tiled VAE
+    decoding — the same latent decoded untiled was clean — and withdrew its
+    earlier general 2048px recommendation. Nothing turns tiling on implicitly
+    any more: only an explicit "on" does, whatever the mode or resolution.
+    """
+    if vae_tiling is None:
+        return False
     if isinstance(vae_tiling, str):
+        # "auto" is a legacy value from when 2K edits enabled tiling by default.
         return vae_tiling.strip().lower() in {"1", "true", "yes", "on"}
     return bool(vae_tiling)
 
@@ -64,6 +72,10 @@ class Engine:
         self._loaded: dict[str, Any] | None = None
         self._busy = False
         self._cancel = threading.Event()
+        # Last load failure, cleared as soon as a load starts. Health is not the
+        # same question as "is a pipeline resident" — an idle engine that has
+        # never loaded anything is perfectly healthy.
+        self._last_error: dict[str, Any] | None = None
         self.device_info = probe()
 
     @property
@@ -79,6 +91,7 @@ class Engine:
             "demo": self.demo,
             "busy": self._busy,
             "loaded": self._loaded,
+            "last_error": self._last_error,
             "device": self.device_info,
         }
 
@@ -95,6 +108,7 @@ class Engine:
         with self._lock:
             self._pipe = None
             self._loaded = None
+            self._last_error = None
             try:
                 import torch
 
@@ -104,6 +118,26 @@ class Engine:
                 pass
 
     def load(self, model_key: str, hub: str, callback: ProgressFn | None = None) -> dict[str, Any]:
+        """Load a pipeline, remembering the failure so the studio can show it.
+
+        Both the generate path and `/api/models/load` come through here, so the
+        health flag stays correct whichever one hit the problem.
+        """
+        with self._lock:
+            self._last_error = None
+        try:
+            return self._load(model_key, hub, callback)
+        except Exception as exc:
+            with self._lock:
+                self._last_error = {
+                    "model_key": model_key,
+                    "hub": hub,
+                    "code": getattr(exc, "code", "ENGINE"),
+                    "message": str(exc),
+                }
+            raise
+
+    def _load(self, model_key: str, hub: str, callback: ProgressFn | None = None) -> dict[str, Any]:
         callback = callback or (lambda _e: None)
         if model_key not in MODELS:
             raise EngineError(f"Unknown model {model_key}", "UNKNOWN_MODEL")
@@ -237,18 +271,24 @@ class Engine:
             if request.get("transparent"):
                 prompt = wrap_rgba_prompt(prompt)
 
-            scale = request.get("scale") or "2k"
+            scale = request.get("scale") or DEFAULT_SCALE
             aspect = request.get("aspect") or "1:1"
+            # The reference area is its own control; when absent fall back to the
+            # scale's table. Read it before the geometry so following the
+            # reference and resizing it agree on the same number — the readout
+            # in the studio is computed from this input.
+            output_resolution = int(
+                request.get("output_resolution") or output_resolution_for(scale)
+            )
             follow_ref = bool(request.get("follow_ref_aspect")) and mode == "edit" and bool(refs)
             if follow_ref:
-                width, height = follow_reference_size(scale, refs[-1].width, refs[-1].height)
+                width, height = follow_reference_size(
+                    output_resolution, refs[-1].width, refs[-1].height
+                )
             elif request.get("width") and request.get("height"):
                 width, height = int(request["width"]), int(request["height"])
             else:
                 width, height = size_for(scale, aspect)
-            output_resolution = int(
-                request.get("output_resolution") or output_resolution_for(scale)
-            )
             steps = int(request.get("steps") or DEFAULT_STEPS)
             cfg = float(request.get("true_cfg_scale") if request.get("true_cfg_scale") is not None else DEFAULT_CFG)
             negative = (request.get("negative_prompt") or "").strip() or None
@@ -262,11 +302,7 @@ class Engine:
                 else DEFAULT_KV_CACHE
             )
             n_images = max(1, min(4, int(request.get("num_images") or 1)))
-            enable_tiling = resolve_vae_tiling(
-                request.get("vae_tiling"),
-                mode=mode,
-                output_resolution=output_resolution,
-            )
+            enable_tiling = resolve_vae_tiling(request.get("vae_tiling"))
 
             if self.demo:
                 images = [

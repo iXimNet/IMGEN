@@ -5,229 +5,393 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>IMGEN — Qwen-Image-2.1</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/app.css" />
 </head>
 <body>
-  <div class="app" id="app">
-    <header class="topbar">
-      <div class="brand">
-        <img src="/favicon.svg" alt="" width="28" height="28" />
-        <div>
-          <div class="brand-name">IMGEN</div>
-          <div class="brand-sub" data-i="tagline">Qwen-Image-2.1</div>
+<svg class="sprite" aria-hidden="true" focusable="false"><defs>
+  <!-- Brand mark: an aperture ring around a glowing safelight core. The one
+       saturated colour in the app is the safelight, so the logo is built from
+       brightness plus that single hue. Drawn at 48 so it stays crisp at any
+       size; the header uses 22 and the favicon 16. -->
+  <linearGradient id="lgTile" x1="0" y1="0" x2=".4" y2="1">
+    <stop offset="0" stop-color="#3a4048"/><stop offset="1" stop-color="#111316"/>
+  </linearGradient>
+  <radialGradient id="rgGlow" cx=".5" cy=".5" r=".5">
+    <stop offset="0" stop-color="#f0a043" stop-opacity=".5"/>
+    <stop offset=".65" stop-color="#f0a043" stop-opacity=".12"/>
+    <stop offset="1" stop-color="#f0a043" stop-opacity="0"/>
+  </radialGradient>
+  <radialGradient id="rgCore" cx=".42" cy=".35" r=".72">
+    <stop offset="0" stop-color="#fff1d6"/><stop offset=".45" stop-color="#f7b566"/>
+    <stop offset="1" stop-color="#d4832c"/>
+  </radialGradient>
+  <symbol id="i-brand" viewBox="0 0 48 48">
+    <rect width="48" height="48" rx="12" fill="url(#lgTile)"/>
+    <rect x=".75" y=".75" width="46.5" height="46.5" rx="11.25" fill="none"
+          stroke="#f0a043" stroke-opacity=".32" stroke-width="1.5"/>
+    <circle cx="24" cy="24" r="18" fill="url(#rgGlow)"/>
+    <circle cx="24" cy="24" r="13.4" fill="none" stroke="#f0a043" stroke-opacity=".62" stroke-width="2.4"/>
+    <g stroke="#f0a043" stroke-opacity=".42" stroke-width="2" stroke-linecap="round">
+      <line x1="24" y1="10.4" x2="24" y2="14.6"/><line x1="24" y1="33.4" x2="24" y2="37.6"/>
+      <line x1="10.4" y1="24" x2="14.6" y2="24"/><line x1="33.4" y1="24" x2="37.6" y2="24"/>
+      <line x1="14.4" y1="14.4" x2="17.4" y2="17.4"/><line x1="30.6" y1="30.6" x2="33.6" y2="33.6"/>
+      <line x1="33.6" y1="14.4" x2="30.6" y2="17.4"/><line x1="17.4" y1="30.6" x2="14.4" y2="33.6"/>
+    </g>
+    <circle cx="24" cy="24" r="5.9" fill="url(#rgCore)"/>
+  </symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></symbol>
+  <symbol id="i-brush" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></symbol>
+  <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6h.09A1.65 1.65 0 0 0 10 3.09V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3a14 14 0 0 1 3.6 9A14 14 0 0 1 12 21a14 14 0 0 1-3.6-9A14 14 0 0 1 12 3z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.2" y2="16.2"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></symbol>
+  <symbol id="i-reuse" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><line x1="4" y1="12" x2="19" y2="12"/><polyline points="13 6 19 12 13 18"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 8 12 3 17 8"/><line x1="12" y1="3" x2="12" y2="15"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="8 12.2 11 15.2 16 9.6"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13.5"/><line x1="12" y1="17" x2="12" y2="17.01"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M17.9 17.9A10.1 10.1 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.1-5.9"/><path d="M9.9 4.2A10.9 10.9 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.2 3.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><line x1="2" y1="2" x2="22" y2="22"/></symbol>
+  <symbol id="i-shuffle" viewBox="0 0 24 24"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.6"/><rect x="14" y="3" width="7" height="7" rx="1.6"/><rect x="3" y="14" width="7" height="7" rx="1.6"/><rect x="14" y="14" width="7" height="7" rx="1.6"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="2" x2="9" y2="5"/><line x1="15" y1="2" x2="15" y2="5"/><line x1="9" y1="19" x2="9" y2="22"/><line x1="15" y1="19" x2="15" y2="22"/><line x1="2" y1="9" x2="5" y2="9"/><line x1="2" y1="15" x2="5" y2="15"/><line x1="19" y1="9" x2="22" y2="9"/><line x1="19" y1="15" x2="22" y2="15"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+  <symbol id="i-github" viewBox="0 0 24 24"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></symbol>
+</defs></svg>
+
+<div class="app" id="app">
+  <header class="topbar">
+    <div class="brand"><svg class="brand-mark" aria-hidden="true"><use href="#i-brand"/></svg><b data-i="app">IMGEN</b></div>
+    <div class="mode-switch" role="tablist">
+      <button type="button" id="modeGen" class="on" role="tab" aria-selected="true"><svg class="ico" width="14" height="14"><use href="#i-image"/></svg><span data-i="generate">生图</span></button>
+      <button type="button" id="modeEdit" role="tab" aria-selected="false"><svg class="ico" width="14" height="14"><use href="#i-brush"/></svg><span data-i="edit">改图</span></button>
+    </div>
+    <div class="grow"></div>
+    <button type="button" class="status-pill" id="statusBtn" aria-haspopup="dialog" aria-expanded="false" title="运行环境">
+      <span class="dot" id="pillDot"></span>
+      <b id="pillDevice">—</b>
+      <span id="pillModel"></span>
+      <svg class="ico chev" width="12" height="12"><use href="#i-chev"/></svg>
+    </button>
+    <button type="button" class="icon-btn on" id="btnHistory" aria-pressed="true" title="历史"><svg class="ico" width="16" height="16"><use href="#i-panel"/></svg></button>
+    <button type="button" class="icon-btn" id="openSettings" title="设置"><svg class="ico" width="16" height="16"><use href="#i-gear"/></svg></button>
+    <button type="button" class="icon-btn" id="langToggle" title="English"><svg class="ico" width="16" height="16"><use href="#i-globe"/></svg></button>
+    <a class="icon-btn" id="githubLink" href="https://github.com/iXimNet/IMGEN" target="_blank" rel="noopener noreferrer"><svg class="ico" width="16" height="16"><use href="#i-github"/></svg></a>
+  </header>
+
+  <div class="work" id="work">
+
+    <!-- ===================== 左栏 ===================== -->
+    <aside class="panel composer" id="composer">
+      <div class="scroll" id="composerScroll">
+
+        <section class="sec">
+          <div class="sec-head">
+            <h2 class="sec-title" data-i="prompt">提示词</h2>
+            <button type="button" class="btn sm" id="btnPresets" aria-haspopup="dialog" aria-expanded="false">
+              <svg class="ico" width="13" height="13"><use href="#i-grid"/></svg><span data-i="presets">预置提示词</span>
+            </button>
+          </div>
+          <div class="textwrap">
+            <textarea id="prompt" rows="4"></textarea>
+            <div class="textfoot"><span id="pCount">0</span><span class="kb" id="genShortcut">⌘↵ <span data-i="run">生成</span></span></div>
+          </div>
+          <p class="sub" id="promptTip"></p>
+        </section>
+
+        <section class="sec hidden" id="refSection">
+          <div class="sec-head">
+            <h2 class="sec-title" data-i="refs">参考图</h2>
+            <span class="sec-val" id="refCount">0 / 10</span>
+          </div>
+          <button type="button" class="dropzone" id="dropzone">
+            <svg class="ico" width="18" height="18"><use href="#i-upload"/></svg>
+            <span data-i="drop">拖入、粘贴，或点击选择</span>
+          </button>
+          <input id="fileInput" class="sr" type="file" accept="image/*" multiple />
+          <div class="ref-grid" id="refGrid"></div>
+          <p class="sub"><span data-i="refsHint">最多 10 张。</span> <b class="ink-text" data-i="refsOrder">顺序就是模型阅读顺序</b></p>
+        </section>
+
+        <section class="sec">
+          <div class="sec-head">
+            <h2 class="sec-title" data-i="canvasSize">成图</h2>
+            <span class="sec-val" id="sizeVal">—</span>
+          </div>
+          <div class="toggle hidden" id="followToggle">
+            <span id="followLabel"><span data-i="followRef">跟随末张参考图比例</span><em class="note-inline" data-i="followRefHint">宽高与画幅由参考图决定，生成时忽略下面的设置</em></span>
+            <button type="button" class="switch" role="switch" aria-checked="true" id="follow" aria-labelledby="followLabel"></button>
+          </div>
+          <div class="seg" id="scaleSeg"></div>
+          <div class="ratios" id="ratios"></div>
+          <div class="two" id="canvasFields">
+            <div class="field">
+              <label class="flabel" for="width"><span data-i="width">宽</span></label>
+              <div class="numwrap"><input id="width" type="number" min="256" max="2752" step="32" inputmode="numeric" /><span class="unit">px</span></div>
+            </div>
+            <div class="field">
+              <label class="flabel" for="height"><span data-i="height">高</span></label>
+              <div class="numwrap"><input id="height" type="number" min="256" max="2752" step="32" inputmode="numeric" /><span class="unit">px</span></div>
+            </div>
+          </div>
+          <p class="sub" id="alignTip"></p>
+        </section>
+
+        <section class="sec hidden" id="refSizeBlock">
+          <div class="sec-head">
+            <h2 class="sec-title" data-i="refSize">参考图缩放</h2>
+            <span class="sec-val" id="outResVal">—</span>
+          </div>
+          <div class="field">
+            <label class="flabel" for="outRes"><span data-i="outputRes">参考图边长</span><span class="flabel-note" id="outHint"></span></label>
+            <div class="numwrap"><input id="outRes" type="number" min="512" max="2752" step="32" value="1024" inputmode="numeric" /><span class="unit">px</span></div>
+          </div>
+          <p class="sub" data-i="outputResHint"></p>
+        </section>
+
+        <section class="sec">
+          <div class="sec-head">
+            <h2 class="sec-title" data-i="sampling">采样</h2>
+            <span class="sec-val" id="sampVal">—</span>
+          </div>
+          <div class="field">
+            <label class="flabel" for="steps"><span data-i="steps">步数</span><span class="flabel-note" id="stepsNote"></span></label>
+            <div class="slider"><input id="steps" type="range" min="4" max="80" step="1" value="40" /><input id="stepsNum" type="number" min="4" max="80" value="40" inputmode="numeric" /></div>
+          </div>
+          <div class="quick" id="stepQuick">
+            <button type="button" data-steps="20"><span data-i="stepsFast">快</span> 20</button>
+            <button type="button" data-steps="40" class="on"><span data-i="stepsStd">标准</span> 40</button>
+            <button type="button" data-steps="60"><span data-i="stepsFine">精修</span> 60</button>
+          </div>
+          <div class="field">
+            <label class="flabel" for="cfg"><span data-i="cfg">CFG</span><span class="flabel-note" id="cfgNote"></span></label>
+            <div class="slider"><input id="cfg" type="range" min="1" max="8" step="0.1" value="1" /><input id="cfgNum" type="number" min="1" max="8" step="0.1" value="1" inputmode="decimal" /></div>
+          </div>
+          <p class="sub" id="cfgTip"></p>
+          <div class="two">
+            <div class="field">
+              <label class="flabel" for="seed"><span data-i="seed">种子</span></label>
+              <div class="numwrap"><input id="seed" type="number" inputmode="numeric" /><span class="unit" data-i="seedHint">留空随机</span></div>
+            </div>
+            <div class="field">
+              <label class="flabel" for="nImages"><span data-i="nImages">出图数量</span></label>
+              <div class="numwrap"><input id="nImages" type="number" min="1" max="4" value="1" inputmode="numeric" /></div>
+            </div>
+          </div>
+          <div class="toggle">
+            <span id="kvLabel"><span data-i="kvCache">前缀 KV Cache</span><em class="note-inline" data-i="kvHintShort">改了会改变结果</em></span>
+            <button type="button" class="switch" role="switch" aria-checked="true" id="kv" aria-labelledby="kvLabel"></button>
+          </div>
+          <div class="toggle">
+            <span id="rgbaLabel"><span data-i="transparent">透明底 RGBA</span><em class="note-inline" data-i="rgbaHintShort">输出透明背景</em></span>
+            <button type="button" class="switch" role="switch" aria-checked="false" id="rgba" aria-labelledby="rgbaLabel"></button>
+          </div>
+        </section>
+
+        <section class="sec">
+          <div class="sec-head">
+            <h2 class="sec-title" data-i="advanced">高级</h2>
+            <button type="button" class="btn sm" id="btnAdv" aria-expanded="false" aria-controls="advBody">
+              <span data-i="expand">展开</span><svg class="ico chev" width="13" height="13"><use href="#i-chev"/></svg>
+            </button>
+          </div>
+          <div class="hidden" id="advBody">
+            <div class="field">
+              <label class="flabel" for="negative"><span data-i="negative">负向提示词</span></label>
+              <textarea id="negative" rows="2" class="short"></textarea>
+              <p class="sub" data-i="negativeHint"></p>
+            </div>
+            <div class="field">
+              <label class="flabel" for="vaeTiling"><span data-i="vaeTiling">VAE Tiling</span><span class="flabel-note" data-i="vaeTilingShort">默认关闭</span></label>
+              <select id="vaeTiling">
+                <option value="false" data-i="vaeOff">off · 关闭</option>
+                <option value="true" data-i="vaeOn">on · 省显存</option>
+              </select>
+              <p class="sub" data-i="vaeTilingHint"></p>
+            </div>
+          </div>
+        </section>
+
+      </div>
+      <div class="runbar">
+        <div class="run-slot">
+          <button type="button" class="btn-primary" id="run"><svg class="ico" width="16" height="16"><use href="#i-image"/></svg><span id="runLabel" data-i="run">生成</span></button>
+          <button type="button" class="btn-cancel" id="cancel" aria-label="取消"><svg class="ico" width="16" height="16"><use href="#i-x"/></svg></button>
         </div>
       </div>
-      <div class="mode-switch" role="tablist">
-        <button type="button" id="modeGen" class="active" data-i="generate">生图</button>
-        <button type="button" id="modeEdit" data-i="edit">改图</button>
+    </aside>
+
+    <!-- ===================== 舞台 ===================== -->
+    <main class="stage">
+      <div class="view" id="view">
+        <div class="viewport hidden" id="viewport">
+          <div class="viewinner" id="viewinner">
+            <div class="zoomwrap" id="zoomwrap"><img id="result" alt="" draggable="false" /></div>
+          </div>
+        </div>
+        <div class="empty" id="empty">
+          <h2 data-i="emptyStage">先有光，才有画面。</h2>
+          <p data-i="emptyStageSub"></p>
+          <div class="starts">
+            <button type="button" class="start-card" id="startRandom"><svg class="ico" width="18" height="18"><use href="#i-shuffle"/></svg><b data-i="startRandom">随机来一条</b></button>
+            <button type="button" class="start-card" id="startPresets"><svg class="ico" width="18" height="18"><use href="#i-grid"/></svg><b data-i="startPresets">打开预置库</b></button>
+            <button type="button" class="start-card" id="startLast"><svg class="ico" width="18" height="18"><use href="#i-reuse"/></svg><b data-i="startLast">沿用上次参数</b></button>
+          </div>
+        </div>
+        <div class="viewhint" data-i="viewHint"></div>
+        <div class="zoombar hidden" id="zoombar">
+          <button type="button" data-z="out" aria-label="缩小"><svg class="ico" width="14" height="14"><use href="#i-minus"/></svg></button>
+          <span class="pct" id="zPct">—</span>
+          <button type="button" data-z="in" aria-label="放大"><svg class="ico" width="14" height="14"><use href="#i-plus"/></svg></button>
+          <span class="sep"></span>
+          <button type="button" data-z="fit" id="zFit" class="on"><span data-i="fit">适应</span></button>
+          <button type="button" data-z="one" aria-label="1:1">1:1</button>
+        </div>
+        <div class="progress hidden" id="progress">
+          <div class="prow"><b id="progressPhase">—</b><span id="progressText"></span></div>
+          <div class="bar"><i id="progressBar"></i></div>
+        </div>
       </div>
-      <div class="top-spacer"></div>
-      <span class="chip" id="deviceChip"></span>
-      <span class="chip" id="modelChip"></span>
-      <span class="chip hidden" id="demoChip" data-i="demo">Demo</span>
-      <button type="button" class="ghost" id="toggleComposer">面板</button>
-      <button type="button" class="ghost" id="toggleHistory" data-i="history">历史</button>
-      <button type="button" class="icon-btn" id="openSettings" title="Settings">⚙</button>
-      <button type="button" class="ghost" id="langToggle">EN</button>
-    </header>
+      <div class="toolbar">
+        <button type="button" class="btn dim" id="downloadBtn" disabled><svg class="ico" width="14" height="14"><use href="#i-download"/></svg><span data-i="downloadImg">下载</span></button>
+        <button type="button" class="btn dim" id="sendEditBtn" disabled><span data-i="sendEdit">送到改图</span><svg class="ico" width="14" height="14"><use href="#i-send"/></svg></button>
+      </div>
+    </main>
 
-    <div class="workspace">
-      <aside class="composer" id="composer">
-        <div class="composer-scroll">
-          <div>
-            <div class="section-label"><span data-i="prompt">提示词</span></div>
-            <textarea id="prompt" rows="6"></textarea>
-            <div class="hint" id="promptHint"></div>
-          </div>
+    <!-- ===================== 右栏 ===================== -->
+    <aside class="panel history" id="historyPane">
+      <div class="hsearch">
+        <div class="searchwrap">
+          <svg class="ico" width="15" height="15"><use href="#i-search"/></svg>
+          <input id="historySearch" type="search" />
+        </div>
+      </div>
+      <div class="scroll"><div class="hlist" id="historyList"></div></div>
+    </aside>
+  </div>
 
-          <div>
-            <div class="section-label">
-              <span data-i="presets">预置提示词</span>
-              <button type="button" class="ghost" id="lucky" data-i="lucky">随机</button>
-            </div>
-            <div class="preset-cats" id="presetCats"></div>
-            <div class="preset-list" id="presetList"></div>
-          </div>
+  <!-- ===================== 窄屏底栏 ===================== -->
+  <div class="mobilebar">
+    <div class="mode-switch">
+      <button type="button" id="modeGen2" class="on"><span data-i="generate">生图</span></button>
+      <button type="button" id="modeEdit2"><span data-i="edit">改图</span></button>
+    </div>
+    <button type="button" class="mbtn" id="btnComposer" aria-expanded="false"><svg class="ico" width="16" height="16"><use href="#i-brush"/></svg><span data-i="params">参数</span></button>
+    <button type="button" class="btn-primary compact" id="run2"><span id="runLabel2" data-i="run">生成</span></button>
+  </div>
 
-          <div id="refSection" class="hidden">
-            <div class="section-label">
-              <span data-i="refs">参考图</span>
-              <span id="refCount">0 / 10</span>
-            </div>
-            <div class="dropzone" id="dropzone" data-i="drop">拖入、粘贴或点击上传</div>
-            <input id="fileInput" class="sr" type="file" accept="image/*" multiple />
-            <div class="ref-grid" id="refGrid"></div>
-            <p class="hint" data-i="refsHint"></p>
-          </div>
+  <!-- ===================== 浮层：预置提示词 ===================== -->
+  <div class="pop side-right hidden" id="popPresets" role="dialog" aria-label="presets">
+    <div class="pop-head">
+      <b data-i="presets">预置提示词</b>
+      <span class="pop-count" id="presetCount">—</span>
+      <button type="button" class="btn sm" id="presetLucky"><svg class="ico" width="12" height="12"><use href="#i-shuffle"/></svg><span data-i="lucky">随机一条</span></button>
+    </div>
+    <div class="search-box">
+      <svg class="ico" width="14" height="14"><use href="#i-search"/></svg>
+      <input id="presetSearch" type="search" />
+    </div>
+    <div class="cats-wrap" id="catsWrap">
+      <div class="cats" id="presetCats"></div>
+      <button type="button" class="cats-nav prev" id="catPrev"><svg class="ico" width="14" height="14"><use href="#i-chev"/></svg></button>
+      <button type="button" class="cats-nav next" id="catNext"><svg class="ico" width="14" height="14"><use href="#i-chev"/></svg></button>
+    </div>
+    <div class="plist" id="presetList"></div>
+    <p class="pop-note" data-i="presetsNote"></p>
+  </div>
 
-          <div>
-            <div class="section-label"><span data-i="params">参数</span><span class="hint" data-i="recommended">官方推荐</span></div>
-            <div class="param-grid">
-              <div class="field">
-                <label data-i="scale">分辨率</label>
-                <div class="seg" id="scaleSeg"></div>
+  <!-- ===================== 浮层：运行环境与模型 ===================== -->
+  <div class="pop hidden" id="popModel" role="dialog" aria-label="envTitle">
+    <div class="grp" data-i="envTitle">运行环境</div>
+    <div class="envrow">
+      <svg class="ico" width="16" height="16"><use href="#i-cpu"/></svg>
+      <div><b id="envDevice">—</b><span id="envMeta">—</span></div>
+    </div>
+    <div class="grp"><span data-i="switchModel">可切换的模型</span><span class="pop-count" id="modelCount">—</span></div>
+    <div class="models" id="modelList"></div>
+    <button type="button" class="btn wide" id="goDownload"><svg class="ico" width="14" height="14"><use href="#i-download"/></svg><span data-i="goDownload">去下载更多模型…</span></button>
+  </div>
+
+  <!-- ===================== 历史详情 ===================== -->
+  <div class="detail hidden" id="detail">
+    <div class="dsheet" role="dialog" aria-modal="true" aria-labelledby="dTitle">
+      <header class="dsheet-head">
+        <h3 id="dTitle">—</h3>
+        <span class="pill" id="dStatus"><svg class="ico" width="12" height="12"><use href="#i-check"/></svg><span id="dStatusText"></span></span>
+        <span class="when" id="dWhen"></span>
+        <span class="grow"></span>
+        <button type="button" class="nav-arrow prev" id="dPrev" aria-label="上一条"><svg class="ico" width="15" height="15"><use href="#i-chev"/></svg></button>
+        <button type="button" class="nav-arrow next" id="dNext" aria-label="下一条"><svg class="ico" width="15" height="15"><use href="#i-chev"/></svg></button>
+        <button type="button" class="icon-btn" id="dClose" aria-label="关闭"><svg class="ico" width="16" height="16"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="dsheet-body">
+        <div class="dview" id="dview">
+          <div class="vmain">
+            <div class="viewport" id="dvp">
+              <div class="viewinner" id="dinner">
+                <div class="zoomwrap" id="dwrap"><img id="dimg" alt="" draggable="false" /></div>
               </div>
-              <div class="field">
-                <label data-i="aspect">画幅</label>
-                <div class="seg" id="aspectSeg"></div>
-              </div>
-              <div class="row">
-                <div class="field">
-                  <label><span data-i="steps">步数</span><b id="stepsVal">40</b></label>
-                  <input id="steps" type="range" min="4" max="80" step="1" value="40" />
-                </div>
-                <div class="field">
-                  <label><span data-i="cfg">CFG</span><b id="cfgVal">1.0</b></label>
-                  <input id="cfg" type="range" min="1" max="8" step="0.1" value="1" />
-                </div>
-              </div>
-              <p class="hint" data-i="cfgHint"></p>
-              <div class="row">
-                <div class="field">
-                  <label data-i="seed">种子</label>
-                  <input id="seed" type="number" value="-1" />
-                </div>
-                <div class="field">
-                  <label data-i="nImages">出图数量</label>
-                  <input id="nImages" type="number" min="1" max="4" value="1" />
-                </div>
-              </div>
-              <label class="toggle"><span data-i="kvCache">KV Cache</span><button type="button" class="switch on" id="kv"></button></label>
-              <label class="toggle"><span data-i="transparent">RGBA</span><button type="button" class="switch" id="rgba"></button></label>
-              <label class="toggle" id="followRow"><span data-i="followRef">跟随参考图</span><button type="button" class="switch on" id="follow"></button></label>
-              <details>
-                <summary data-i="advanced">高级</summary>
-                <div class="row" style="margin-top:10px">
-                  <div class="field"><label data-i="width">宽</label><input id="width" type="number" min="256" max="2752" step="32" /></div>
-                  <div class="field"><label data-i="height">高</label><input id="height" type="number" min="256" max="2752" step="32" /></div>
-                </div>
-                <div class="field">
-                  <label data-i="outputRes">output_resolution</label>
-                  <input id="outRes" type="number" min="512" max="2752" step="64" value="2048" />
-                  <p class="hint" data-i="outputResHint"></p>
-                </div>
-                <div class="field">
-                  <label data-i="negative">负向提示词</label>
-                  <textarea id="negative" rows="3"></textarea>
-                  <p class="hint" data-i="negativeHint"></p>
-                </div>
-                <div class="field">
-                  <label data-i="vaeTiling">VAE Tiling</label>
-                  <select id="vaeTiling">
-                    <option value="auto">auto</option>
-                    <option value="true">on</option>
-                    <option value="false">off</option>
-                  </select>
-                  <p class="hint" data-i="vaeTilingHint"></p>
-                </div>
-              </details>
+            </div>
+            <div class="dempty hidden" id="dEmpty">
+              <svg class="ico" width="26" height="26"><use href="#i-alert"/></svg>
+              <p id="dEmptyText">—</p>
+            </div>
+            <div class="viewhint" data-i="viewHint"></div>
+            <div class="zoombar">
+              <button type="button" data-dz="out" aria-label="缩小"><svg class="ico" width="14" height="14"><use href="#i-minus"/></svg></button>
+              <span class="pct" id="dzPct">—</span>
+              <button type="button" data-dz="in" aria-label="放大"><svg class="ico" width="14" height="14"><use href="#i-plus"/></svg></button>
+              <span class="sep"></span>
+              <button type="button" data-dz="fit" id="dzFit" class="on"><span data-i="fit">适应</span></button>
+              <button type="button" data-dz="one" aria-label="1:1">1:1</button>
             </div>
           </div>
-        </div>
-        <div class="runbar">
-          <button type="button" class="btn-gold" id="run" data-i="run">生成</button>
-          <button type="button" class="btn hidden" id="cancel" data-i="cancel">取消</button>
-        </div>
-      </aside>
-
-      <main class="stage">
-        <div class="canvas">
-          <div class="frame" id="frame">
-            <div class="empty" id="empty">
-              <h2 data-i="emptyStage">先有光，才有画面。</h2>
-              <p data-i="emptyStageSub"></p>
-            </div>
-            <img class="result hidden" id="result" alt="result" />
-            <div class="progress hidden" id="progress">
-              <div id="progressText"></div>
-              <div class="bar"><span id="progressBar"></span></div>
-            </div>
+          <div class="refstrip hidden" id="dRefs">
+            <div class="refstrip-list" id="dRefList"></div>
           </div>
         </div>
-        <div class="toolbar">
-          <button type="button" class="ghost" id="downloadBtn" data-i="downloadImg">下载</button>
-          <button type="button" class="ghost" id="reuseBtn" data-i="reuse">复用参数</button>
-          <button type="button" class="ghost" id="sendEditBtn" data-i="sendEdit">送到改图</button>
-        </div>
-      </main>
-
-      <aside class="history" id="historyPane">
-        <div class="history-head">
-          <input id="historySearch" type="text" data-i-placeholder="searchHistory" placeholder="搜索…" />
-        </div>
-        <div class="history-list" id="historyList"></div>
-      </aside>
+        <aside class="dmeta" id="dMeta"></aside>
+      </div>
+      <footer class="dsheet-foot" id="dFoot"></footer>
     </div>
   </div>
 
-  <dialog id="wizard">
-    <form class="wizard" method="dialog">
-      <div class="steps" id="wizardSteps"><span class="on"></span><span></span><span></span><span></span></div>
-      <div id="wizardBody"></div>
-      <div class="wizard-nav">
-        <button type="button" class="ghost" id="wizBack" data-i="back">返回</button>
-        <button type="button" class="btn-gold" id="wizNext" data-i="next">继续</button>
-      </div>
-    </form>
-  </dialog>
+  <!-- ===================== 模型与下载 ===================== -->
+  <div class="overlay hidden" id="settings">
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="setTitle">
+      <header class="sheet-head">
+        <svg class="ico head-ico" width="19" height="19"><use href="#i-download"/></svg>
+        <h3 id="setTitle" data-i="settingsTitle">模型与下载</h3>
+        <button type="button" class="icon-btn" id="settingsClose" aria-label="关闭"><svg class="ico" width="16" height="16"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="sheet-body" id="settingsBody"></div>
+      <footer class="sheet-foot" id="settingsFoot"></footer>
+    </div>
+  </div>
 
-  <dialog id="settings">
-    <form class="wizard" method="dialog">
-      <div class="dialog-head">
-        <h1 data-i="settings">设置</h1>
-        <button type="button" class="icon-btn" id="closeSettingsX" data-i-aria="close" aria-label="关闭">×</button>
-      </div>
-      <div class="field" style="margin-top:12px">
-        <label data-i="hub">来源</label>
-        <select id="setHub">
-          <option value="huggingface">Hugging Face</option>
-          <option value="modelscope">ModelScope</option>
-        </select>
-      </div>
-      <div class="field">
-        <label data-i="model">模型</label>
-        <select id="setModel">
-          <option value="qwen-image-2.1">Qwen-Image-2.1 (BF16)</option>
-          <option value="image21-int8">Image21-INT8</option>
-        </select>
-      </div>
-      <div class="field"><label data-i="hfToken">HF Token</label><input id="setHf" type="password" autocomplete="off" /></div>
-      <div class="field"><label data-i="msToken">ModelScope Token</label><input id="setMs" type="password" autocomplete="off" /></div>
-      <p class="hint" data-i="licenseNote"></p>
-      <p class="hint" id="settingsModelStatus"></p>
-      <div class="wizard-nav">
-        <button type="button" class="ghost" id="revealOut" data-i="reveal">打开文件夹</button>
-        <div class="nav-end">
-          <button type="button" class="ghost" id="settingsDownload" data-i="download">下载权重</button>
-          <button type="button" class="ghost" id="closeSettings" data-i="cancel">取消</button>
-          <button type="submit" class="btn-gold" id="saveSettings" data-i="save">保存</button>
-        </div>
-      </div>
-    </form>
-  </dialog>
-
-  <dialog id="historyMore">
-    <form class="wizard sheet-form" method="dialog">
-      <div class="dialog-head">
-        <h1 data-i="paramsTitle">生成参数</h1>
-        <button type="button" class="icon-btn" id="closeHistoryMoreX" aria-label="关闭">×</button>
-      </div>
-      <div class="sheet-body" id="historyMoreBody"></div>
-      <div class="wizard-nav">
-        <button type="button" class="btn-danger ghost" id="histDel" data-i="delete">删除</button>
-        <div class="nav-end">
-          <button type="button" class="ghost" id="histReuse" data-i="reuse">复用参数</button>
-          <button type="button" class="ghost" id="closeHistoryMore" data-i="close">关闭</button>
-        </div>
-      </div>
-    </form>
-  </dialog>
+  <!-- ===================== 首次运行 ===================== -->
+  <div class="overlay hidden" id="firstRun">
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="frTitle">
+      <header class="sheet-head">
+        <svg class="ico head-ico" width="19" height="19"><use href="#i-image"/></svg>
+        <h3 id="frTitle" data-i="wizardTitle">开始之前</h3>
+      </header>
+      <div class="sheet-body" id="firstRunBody"></div>
+      <footer class="sheet-foot" id="firstRunFoot"></footer>
+    </div>
+  </div>
 
   <div class="toasts" id="toasts"></div>
-  <script src="/js/i18n.js"></script>
-  <script src="/js/app.js"></script>
+</div>
+
+<script src="/js/i18n.js"></script>
+<script src="/js/app.js"></script>
 </body>
 </html>

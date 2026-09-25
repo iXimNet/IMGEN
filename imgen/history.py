@@ -114,18 +114,30 @@ class History:
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         return self._to_dict(row) if row else None
 
-    def list(self, limit: int = 80, offset: int = 0, query: str = "") -> list[dict[str, Any]]:
-        sql = "SELECT * FROM jobs WHERE status != 'deleted'"
+    def _list_filter(self, query: str) -> tuple[str, list[Any]]:
+        """Shared WHERE clause so `list` and `count` can never disagree."""
+        sql = " FROM jobs WHERE status != 'deleted'"
         params: list[Any] = []
         if query:
             sql += " AND (prompt LIKE ? OR mode LIKE ? OR model_key LIKE ?)"
             like = f"%{query}%"
             params.extend([like, like, like])
-        sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        return sql, params
+
+    def list(self, limit: int = 80, offset: int = 0, query: str = "") -> list[dict[str, Any]]:
+        where, params = self._list_filter(query)
+        sql = "SELECT *" + where + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         with self._connect() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [self._to_dict(row) for row in rows]
+
+    def count(self, query: str = "") -> int:
+        """How many records the current filter matches, for paging decisions."""
+        where, params = self._list_filter(query)
+        with self._connect() as conn:
+            row = conn.execute("SELECT COUNT(*)" + where, params).fetchone()
+        return int(row[0]) if row else 0
 
     def delete(self, job_id: str) -> bool:
         record = self.get(job_id)

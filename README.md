@@ -14,7 +14,7 @@ Not Gradio. A FastAPI backend with a purpose-built interface. Runs on **Windows*
 
 - **Generate and edit in one pipeline.** Qwen-Image-2.1 is a unified model (`QwenImage21Pipeline`). Switching modes does not switch checkpoints.
 - **Two weights, two hubs.** Choose **Qwen-Image-2.1** (official BF16) or **Image21-INT8** (community bitsandbytes conversion by [ixim](https://huggingface.co/ixim/Image21-INT8)). Download from **Hugging Face** or **ModelScope** on first run.
-- **Official sampling defaults.** 40 steps, `true_cfg_scale=1.0` (guidance off), native 2K aspect table, prefix KV cache on, RGBA prompt template from the model card.
+- **Sampling defaults.** 40 steps, `true_cfg_scale=1.0` (guidance off), prefix KV cache on, RGBA prompt template — plus a 1024px default area and VAE tiling off, following the Image21-INT8 errata. The 2K aspect table is one click away.
 - **Multi-reference editing.** Up to 10 images, ordered the way the model reads them. Optional “follow last reference aspect”.
 - **Preset library.** 14 generate categories and 5 edit categories — portraits, landscapes, product, Chinese/English lettering, stickers, interiors, multi-ref composites, and more.
 - **History with full parameters.** Prompt, seed, size, steps, CFG, model, hub, duration, and reference images. Restore any run.
@@ -26,7 +26,7 @@ Not Gradio. A FastAPI backend with a purpose-built interface. Runs on **Windows*
 | Key | Label | Hub IDs | Approx. size | Notes |
 |---|---|---|---|---|
 | `qwen-image-2.1` | Qwen-Image-2.1 | HF / ModelScope `Qwen/Qwen-Image-2.1` | ~33 GB | Official BF16. Native 2K, RGBA, 10 refs. CUDA, MPS, or CPU. |
-| `image21-int8` | Image21-INT8 | HF `ixim/Image21-INT8` · ModelScope `iximbox/Image21-INT8` | ~19 GB | Community INT8. **NVIDIA CUDA only.** Edit at 2048 with VAE tiling. |
+| `image21-int8` | Image21-INT8 | HF `ixim/Image21-INT8` · ModelScope `iximbox/Image21-INT8` | ~19 GB | Community INT8. **NVIDIA CUDA only.** Start edits at 1024 and leave VAE tiling off. |
 
 INT8 loading uses the upstream sequential loader and offload helper from `ixim/Image21-INT8` (`imgen/int8_runtime.py`). Do not re-quantize those weights at load time.
 
@@ -38,9 +38,10 @@ Taken from the [official README](https://github.com/QwenLM/Qwen-Image-2.1) and D
 |---|---|---|
 | `num_inference_steps` | **40** | Official default. |
 | `true_cfg_scale` | **1.0** | Guidance off. CFG only engages with a negative prompt and `true_cfg_scale > 1`, and roughly doubles work per step. |
-| `width` × `height` | **2048 × 2048** | Native 2K. 1K table is offered for smaller VRAM. |
+| `width` × `height` | **1024 × 1024** | 1K table. The Image21-INT8 card **withdrew** its general 2048px recommendation in favour of a 1024px area scale; the 2K table is still there if you want it. |
 | `use_kv_cache` | **true** | Prefix cache for text and condition images. Toggling it changes the sample. |
-| `output_resolution` | **2048** at 2K / **1024** at 1K | Resizes reference images when editing. INT8 editing was documented at 2048 with VAE tiling. |
+| `output_resolution` | **2048** at 2K / **1024** at 1K | Resizes reference images when editing. |
+| `vae_tiling` | **false** | Tiled VAE decoding stained 2048 editing runs; the card's earlier 2048px recipe was withdrawn in favour of 1024 with untiled VAE. Tiling buys VRAM, not quality — opt in, never assume on. |
 | RGBA prompt | official wrapper | `This is an RGBA image with transparency. … The image has alpha channel and the background is transparent.` |
 
 1K sizes are half of this table, each side snapped to a multiple of 32.
@@ -57,7 +58,7 @@ Official 2K aspect sizes:
 9:16  1536 × 2752
 ```
 
-Consumer GPUs should enable **CPU offload** (automatic below ~40 GiB) and **VAE tiling** at 2K.
+Consumer GPUs should enable **CPU offload** (automatic below ~40 GiB). Leave **VAE tiling** off unless you run out of VRAM at 2K — it trades memory for short vertical stains, so it is a fallback, not a speed or quality setting.
 
 ## Requirements
 
@@ -177,4 +178,4 @@ tests/
 
 ## 中文摘要
 
-IMGEN 是面向 **Qwen-Image-2.1** 的本地生图 / 改图工作室：首次运行从 Hugging Face 或 ModelScope 下载权重；参数默认值对齐官方 40 步、关闭 CFG、原生 2K；改图最多 10 张参考图；按分类提供大量预置提示词；历史记录保存完整生成参数。界面不使用 Gradio。Windows（NVIDIA CUDA）与 macOS（Apple Silicon MPS，仅 BF16）均可运行。应用代码 MIT 开源；模型权重请遵守 Qwen Research License。
+IMGEN 是面向 **Qwen-Image-2.1** 的本地生图 / 改图工作室：首次运行从 Hugging Face 或 ModelScope 下载权重；参数默认值：40 步、关闭 CFG、1024px 面积尺度、VAE Tiling 关闭（依 Image21-INT8 勘误，2K 档位仍可一键切换）；改图最多 10 张参考图；按分类提供大量预置提示词；历史记录保存完整生成参数。界面不使用 Gradio。Windows（NVIDIA CUDA）与 macOS（Apple Silicon MPS，仅 BF16）均可运行。应用代码 MIT 开源；模型权重请遵守 Qwen Research License。

@@ -30,13 +30,18 @@ def _quiet_warn(*args, **kwargs):
     return _ORIG_WARN(*args, **kwargs)
 
 
+class _DropMatMul8bitCast(logging.Filter):
+    """bitsandbytes 0.50+ logs the bf16→fp16 cast via logging, not warnings."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "MatMul8bitLt:" not in record.getMessage()
+
+
 def silence_int8_bf16_cast_warnings() -> None:
     """bitsandbytes INT8 kernels take fp16 activations.
 
-    Image21-INT8 is loaded in bfloat16 (official recipe). MatMul8bitLt warns on
-    every layer / step unless this is silenced. Libraries often insert an
-    'always' UserWarning filter in front of a message match, so we also wrap
-    warnings.warn and the bitsandbytes-local `warn` alias.
+    Image21-INT8 is loaded in bfloat16. Older bitsandbytes calls warnings.warn
+    on every layer; 0.50+ uses logger.warning. Both paths are silenced here.
     """
     global _SILENCED
     warnings.filterwarnings("ignore", message=_BF16_CAST_FILTER)
@@ -47,15 +52,18 @@ def silence_int8_bf16_cast_warnings() -> None:
         module=r"bitsandbytes(\..*)?",
     )
     warnings.warn = _quiet_warn
-    if not _SILENCED:
-        logging.getLogger("py.warnings").addFilter(
-            lambda record: "MatMul8bitLt:" not in record.getMessage()
-        )
+    drop = _DropMatMul8bitCast()
+    for name in ("bitsandbytes", "bitsandbytes.autograd", "bitsandbytes.autograd._functions", "py.warnings"):
+        logger = logging.getLogger(name)
+        if not any(isinstance(item, _DropMatMul8bitCast) for item in logger.filters):
+            logger.addFilter(drop)
     try:
         import bitsandbytes.autograd._functions as bnb_fn
 
         bnb_fn.warn = _quiet_warn
         bnb_fn.warnings.warn = _quiet_warn
+        if not any(isinstance(item, _DropMatMul8bitCast) for item in bnb_fn.logger.filters):
+            bnb_fn.logger.addFilter(drop)
     except Exception:
         pass
     try:

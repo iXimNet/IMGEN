@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from .constants import MODELS, repo_id
+from .constants import HUBS, MODELS, repo_id
 
 ProgressFn = Callable[[dict], None]
 
@@ -123,26 +123,76 @@ def resolve_snapshot_dir(path: Path) -> Path:
     return path
 
 
+HF_ENV_ORDER = ("HF_HUB_CACHE", "HF_HOME")
+MS_ENV_ORDER = ("MODELSCOPE_CACHE",)
+
+
+def _hub_cache_roots(hub: str) -> list[Path]:
+    """Candidate cache roots for a hub, most authoritative first.
+
+    These mirror what the download clients themselves read, so the studio
+    writes weights where the rest of the toolchain already looks for them.
+    """
+    if hub == "huggingface":
+        roots: list[Path] = []
+        hub_cache = os.environ.get("HF_HUB_CACHE")
+        if hub_cache:
+            roots.append(Path(hub_cache))
+        hf_home = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface"))
+        roots.extend([hf_home / "hub", hf_home])
+        return roots
+    if hub == "modelscope":
+        return [Path(os.environ.get("MODELSCOPE_CACHE", Path.home() / ".cache" / "modelscope"))]
+    raise ValueError(f"Unknown hub {hub}")
+
+
+def hub_cache_root(hub: str) -> Path:
+    """The directory this hub keeps weights in, after environment overrides."""
+    return _hub_cache_roots(hub)[0]
+
+
+def hub_storage(hub: str) -> dict:
+    """Where a hub reads and writes weights, and which setting chose the path."""
+    env_vars = HF_ENV_ORDER if hub == "huggingface" else MS_ENV_ORDER
+    env_var = next((name for name in env_vars if os.environ.get(name)), None)
+    if hub == "huggingface":
+        default = Path.home() / ".cache" / "huggingface" / "hub"
+    else:
+        default = Path.home() / ".cache" / "modelscope"
+    root = hub_cache_root(hub)
+    return {
+        "hub": hub,
+        "path": str(root),
+        "env_var": env_var,
+        "default_path": str(default),
+        "exists": root.exists(),
+    }
+
+
 def _snapshot_candidates(model_key: str, hub: str, cache_root: Path | None = None) -> list[Path]:
     repo = repo_id(model_key, hub)
     candidates: list[Path] = []
     if hub == "huggingface":
-        hf_home = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface"))
-        hub_dir = hf_home / "hub" / ("models--" + repo.replace("/", "--"))
-        snapshots = hub_dir / "snapshots"
-        if snapshots.exists():
-            for snap in sorted(snapshots.iterdir(), reverse=True):
-                candidates.append(snap)
-        candidates.append(hub_dir)
+        dir_name = "models--" + repo.replace("/", "--")
+        for root in _hub_cache_roots("huggingface"):
+            hub_dir = root / dir_name
+            snapshots = hub_dir / "snapshots"
+            if snapshots.exists():
+                for snap in sorted(snapshots.iterdir(), reverse=True):
+                    candidates.append(snap)
+            candidates.append(hub_dir)
     else:
-        ms_home = Path(os.environ.get("MODELSCOPE_CACHE", Path.home() / ".cache" / "modelscope"))
-        candidates.extend(
-            [
-                ms_home / "hub" / repo,
-                ms_home / repo,
-                ms_home / "models" / repo,
-            ]
-        )
+        # ModelScope moved snapshots under `hub/models/`; older builds used
+        # `hub/` or the cache root directly.
+        for root in _hub_cache_roots("modelscope"):
+            candidates.extend(
+                [
+                    root / "hub" / "models" / repo,
+                    root / "hub" / repo,
+                    root / "models" / repo,
+                    root / repo,
+                ]
+            )
     if cache_root:
         candidates.insert(0, cache_root / hub / repo.replace("/", os.sep))
     return candidates
@@ -162,6 +212,34 @@ def model_local_path(model_key: str, hub: str, cache_root: Path | None = None) -
     found = find_snapshot_dir(model_key, hub, cache_root)
     if found and snapshot_is_complete(found):
         return found
+    return None
+
+
+def hub_snapshot_state(model_key: str, hub: str, cache_root: Path | None = None) -> dict:
+    """What one hub's cache holds for a model: nothing, a partial snapshot, or weights."""
+    complete = model_local_path(model_key, hub, cache_root)
+    found = complete or find_snapshot_dir(model_key, hub, cache_root)
+    return {
+        "hub": hub,
+        "complete": bool(complete),
+        "incomplete": bool(found) and not complete,
+        "path": complete or found,
+        "missing": missing_weight_files(found) if found and not complete else [],
+    }
+
+
+def resolve_local_hub(model_key: str, hub: str, cache_root: Path | None = None) -> str | None:
+    """The hub that actually holds this model on disk, preferring the requested one.
+
+    A user can have the weights from ModelScope while the studio is set to
+    Hugging Face (or the reverse). Generating should use what is on disk
+    instead of failing, so callers resolve the hub before loading.
+    """
+    if hub_snapshot_state(model_key, hub, cache_root)["complete"]:
+        return hub
+    for other in HUBS:
+        if other != hub and hub_snapshot_state(model_key, other, cache_root)["complete"]:
+            return other
     return None
 
 
@@ -334,13 +412,32 @@ def _download_modelscope(repo: str, token: str, callback: ProgressFn, model_key:
 
 
 def model_status(hub: str) -> list[dict]:
+    """Per-model presence report, told apart by which hub holds the weights.
+
+    `downloaded` answers "is it in the selected source"; `downloaded_any`
+    answers "is it on disk at all". The studio only ever needs the second one
+    to decide whether a model is usable, which is why both are reported.
+    """
+    order = [hub] + [key for key in HUBS if key != hub]
     rows = []
     for key, spec in MODELS.items():
-        complete = model_local_path(key, hub)
-        found = find_snapshot_dir(key, hub)
-        missing = missing_weight_files(found) if found and not complete else []
-        path = complete or found
-        size = _dir_size(path) if path else 0
+        states = {name: hub_snapshot_state(key, name) for name in order}
+        selected = states[hub]
+        complete_hubs = [name for name in order if states[name]["complete"]]
+        incomplete_hubs = [name for name in order if states[name]["incomplete"]]
+        local_hub = complete_hubs[0] if complete_hubs else None
+
+        if complete_hubs:
+            preferred = states[local_hub]["path"]
+        else:
+            preferred = selected["path"] or next(
+                (states[name]["path"] for name in incomplete_hubs), None
+            )
+        missing = selected["missing"] or next(
+            (states[name]["missing"] for name in incomplete_hubs), []
+        )
+        size = _dir_size(preferred) if preferred else 0
+
         rows.append(
             {
                 "key": key,
@@ -348,10 +445,16 @@ def model_status(hub: str) -> list[dict]:
                 "precision": spec["precision"],
                 "repo": repo_id(key, hub),
                 "approx_gb": spec["approx_gb"],
-                "downloaded": bool(complete),
-                "incomplete": bool(found) and not bool(complete),
+                "downloaded": bool(selected["complete"]),
+                "downloaded_any": bool(complete_hubs),
+                "available_hubs": complete_hubs,
+                "local_hub": local_hub,
+                "incomplete": bool(selected["incomplete"]),
+                "incomplete_any": bool(incomplete_hubs),
+                "incomplete_hubs": incomplete_hubs,
                 "missing_files": missing[:12],
-                "path": str(path) if path else None,
+                "missing_count": len(missing),
+                "path": str(preferred) if preferred else None,
                 "size_bytes": size,
                 "size_gb": round(size / (1024**3), 2) if size else 0,
                 "requires_cuda": spec["requires_cuda"],
