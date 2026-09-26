@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import sys
 import threading
 from pathlib import Path
@@ -47,6 +48,11 @@ from .sizes import catalog as size_catalog
 
 STATIC_DIR = Path(__file__).parent / "static"
 
+# A job id is 16 hex characters (`new_id`), and an extra frame appends `_<n>`.
+# The output/thumb routes join the id onto a folder, so the shape is checked
+# before the join — anything else could climb out of it.
+JOB_FILE_ID = re.compile(r"[0-9a-f]{16}(?:_[1-9][0-9]*)?")
+
 
 def _as_bool(value: str | bool | None, default: bool = False) -> bool:
     if value is None:
@@ -71,6 +77,14 @@ def _public_job(item: dict[str, Any], engine=None) -> dict[str, Any]:
     ``ref_count`` plus ready-made ``ref_urls`` instead of leaking absolute
     paths on disk.
 
+    A run with ``num_images > 1`` keeps its extra frames in
+    ``params.extra_images``, which holds absolute paths too. They become
+    ``image_urls`` / ``thumb_urls`` here — one entry per frame, in the order the
+    engine produced them — and the paths are dropped, so a single record can
+    show everything it made without telling the browser where the files live.
+    ``image_url`` / ``thumb_url`` stay as the first frame, which is what the
+    older callers assume; ``output_count`` says how many there are.
+
     A running row also carries the engine's live stage. Only one job runs at a
     time, so the stage belongs to it — and reporting it is what lets the studio
     tell "still encoding, be patient" apart from "nothing is happening".
@@ -80,8 +94,23 @@ def _public_job(item: dict[str, Any], engine=None) -> dict[str, Any]:
     item.pop("image_path", None)
     item.pop("thumb_path", None)
     job_id = item["id"]
+    params = item.get("params")
+    if not isinstance(params, dict):
+        params = {}
+        item["params"] = params
+    extras = params.pop("extra_images", None) or []
+    extra_ids = [
+        row.get("id") for row in extras if isinstance(row, dict) and row.get("id")
+    ]
     item["image_url"] = f"/api/outputs/{job_id}" if has_image else None
     item["thumb_url"] = f"/api/thumbs/{job_id}" if has_image else None
+    item["image_urls"] = ([item["image_url"]] if has_image else []) + [
+        f"/api/outputs/{extra_id}" for extra_id in extra_ids
+    ]
+    item["thumb_urls"] = ([item["thumb_url"]] if has_image else []) + [
+        f"/api/thumbs/{extra_id}" for extra_id in extra_ids
+    ]
+    item["output_count"] = len(item["image_urls"])
     item["ref_count"] = len(refs)
     item["ref_urls"] = [f"/api/refs/{job_id}/{index}" for index in range(len(refs))]
     if item.get("status") == "running" and engine is not None:
@@ -501,7 +530,12 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
     def _file_response(kind: str, job_id: str) -> FileResponse:
         item = history.get(job_id)
         if not item:
-            # extra images saved as {id}_{n}
+            # An extra frame is saved as `{job_id}_{n}` and has no row of its
+            # own. Only that shape may reach the filesystem: a name is joined
+            # onto the outputs folder, so anything else (`..`, a drive letter,
+            # an absolute path) must be refused before the join, not after.
+            if not JOB_FILE_ID.fullmatch(job_id):
+                raise HTTPException(404, "Not found.")
             path = paths.outputs / f"{job_id}.png" if kind == "outputs" else paths.thumbs / f"{job_id}.jpg"
             if path.exists():
                 return FileResponse(path)

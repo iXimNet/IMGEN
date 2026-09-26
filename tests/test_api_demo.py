@@ -1,3 +1,4 @@
+import json
 import time
 from io import BytesIO
 
@@ -477,3 +478,148 @@ def test_extra_weight_dirs_roundtrip(client, tmp_path):
     assert saved["extra_weight_dirs"] == []
     assert client.get("/api/bootstrap").json()["storage"]["extra_dirs"] == []
 
+
+
+def _run_generate(client, **overrides) -> dict:
+    """Submit one generation and wait for a terminal state, returning the row."""
+    data = {"mode": "generate", "prompt": "multi frame probe", "steps": "4"}
+    data.update(overrides)
+    job_id = client.post("/api/jobs", data=data).json()["id"]
+    item = None
+    for _ in range(120):
+        item = client.get(f"/api/jobs/{job_id}").json()
+        if item["status"] in {"succeeded", "failed", "cancelled"}:
+            break
+        time.sleep(0.05)
+    assert item and item["status"] == "succeeded", item
+    return item
+
+
+def test_multi_image_run_exposes_every_frame(client):
+    """`num_images > 1` produces N pictures; all N must be reachable by URL.
+
+    The extra frames have no row of their own, so the only way the browser can
+    learn about them is this contract. Before it existed the studio showed one
+    picture out of four while the other three sat in `outputs/` unreferenced.
+    """
+    item = _run_generate(client, num_images="3")
+    assert item["params"]["num_images"] == 3
+    assert item["output_count"] == 3
+    assert len(item["image_urls"]) == 3
+    assert len(item["thumb_urls"]) == 3
+    # The first frame keeps the plain id, so older callers still work.
+    assert item["image_urls"][0] == item["image_url"] == f"/api/outputs/{item['id']}"
+    assert item["image_urls"][1:] == [
+        f"/api/outputs/{item['id']}_1",
+        f"/api/outputs/{item['id']}_2",
+    ]
+    for url in item["image_urls"] + item["thumb_urls"]:
+        assert client.get(url).status_code == 200, url
+    # Each frame is its own picture, not the same one served three times.
+    bodies = {client.get(url).content for url in item["image_urls"]}
+    assert len(bodies) == 3
+
+
+def test_extra_frame_paths_never_reach_the_browser(client):
+    """The contract carries URLs; absolute paths stay on the server."""
+    item = _run_generate(client, num_images="2")
+    assert "extra_images" not in item["params"], "paths must be stripped"
+    blob = json.dumps(item)
+    assert "extra_images" not in blob
+    assert "image_path" not in blob and "thumb_path" not in blob
+    assert ":\\" not in blob and ":/" not in blob, "no filesystem paths may leak"
+
+
+def test_single_image_run_still_reports_one(client):
+    """The default path keeps its old shape: one frame, one URL."""
+    item = _run_generate(client)
+    assert item["output_count"] == 1
+    assert item["image_urls"] == [f"/api/outputs/{item['id']}"]
+    assert item["image_url"] == f"/api/outputs/{item['id']}"
+
+
+def test_output_route_refuses_names_it_did_not_make(client, tmp_path):
+    """The extra-frame fallback joins a name onto a folder, so it must be strict.
+
+    Without the shape check `..\\secret` walks out of `outputs/` and reads any
+    `.png` next to it — reachable the moment the server is bound to a LAN
+    address.
+    """
+    outside = tmp_path / "secret.png"
+    outside.write_bytes(b"\x89PNG\r\n\x1a\nnot-a-real-image")
+
+    for probe in (
+        "..%5Csecret",
+        "..%2Fsecret",
+        f"..%5C{outside.name}",
+        "0e275912caf441ea_0",  # frame numbers start at 1
+        "0e275912caf441ea_1_2",
+        "not-a-job-id",
+        "0E275912CAF441EA",  # ids are lower-case hex
+    ):
+        assert client.get(f"/api/outputs/{probe}").status_code == 404, probe
+        assert client.get(f"/api/thumbs/{probe}").status_code == 404, probe
+
+    # A well-formed extra-frame name that simply does not exist is still a 404,
+    # not a 500 — the shape check must not turn a miss into a crash.
+    assert client.get("/api/outputs/0123456789abcdef_7").status_code == 404
+
+
+def test_deleting_a_multi_image_run_removes_every_frame(client, tmp_path):
+    """Delete has to reach the frames it cannot see in a column.
+
+    `params.extra_images` is the only record of them; a delete that ignores it
+    leaves orphan files behind forever.
+    """
+    item = _run_generate(client, num_images="3")
+    job_id = item["id"]
+    outputs = tmp_path / "outputs"
+    thumbs = tmp_path / "thumbs"
+
+    made = sorted(p.name for p in outputs.glob(f"{job_id}*"))
+    assert len(made) == 3, made
+    assert len(list(thumbs.glob(f"{job_id}*"))) == 3
+
+    assert client.delete(f"/api/jobs/{job_id}").status_code == 200
+    assert client.get(f"/api/jobs/{job_id}").status_code == 404
+    assert list(outputs.glob(f"{job_id}*")) == []
+    assert list(thumbs.glob(f"{job_id}*")) == []
+
+
+def test_older_records_gain_frames_without_a_migration(client, tmp_path):
+    """Rows written before the contract existed must light up as they are.
+
+    The frames were always in `params.extra_images`; the API just never read
+    them. Nothing on disk changes, so no migration is needed.
+    """
+    from imgen.history import History
+    from imgen.paths import AppPaths
+
+    paths = AppPaths(tmp_path)
+    hist = History(paths)
+    job_id = "aaaabbbbccccdddd"
+    image = Image.new("RGBA", (32, 32), (10, 20, 30, 255))
+    image_path, thumb_path = hist.save_image(job_id, image)
+    extras = []
+    for index in (1, 2):
+        extra_id = f"{job_id}_{index}"
+        path, thumb = hist.save_image(extra_id, image)
+        extras.append({"id": extra_id, "image_path": path, "thumb_path": thumb})
+    hist.create(
+        {
+            "id": job_id,
+            "mode": "generate",
+            "model_key": "qwen-image-2.1",
+            "hub": "huggingface",
+            "prompt": "legacy row",
+            "params": {"num_images": 3, "extra_images": extras},
+            "status": "succeeded",
+            "image_path": image_path,
+            "thumb_path": thumb_path,
+        }
+    )
+
+    row = client.get(f"/api/jobs/{job_id}").json()
+    assert row["output_count"] == 3
+    assert row["image_urls"][2] == f"/api/outputs/{job_id}_2"
+    assert "extra_images" not in row["params"]

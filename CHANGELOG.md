@@ -6,6 +6,47 @@
 `image_path`, `thumb_path` or `ref_paths`. They return `ref_count` and
 `ref_urls` instead, so the browser never sees absolute paths on disk.
 
+They also carry `image_urls` / `thumb_urls` / `output_count` now, and
+`params.extra_images` (absolute paths) is stripped before the row leaves the
+server — see **Multi-image runs** below.
+
+### Multi-image runs
+- **A run with `num_images > 1` made several pictures and showed one.** The
+  engine has always returned every frame and `outputs/` has always held all of
+  them, but only `images[0]` reached the browser: `_public_job()` published a
+  single `image_url` / `thumb_url`, and the extras lived in
+  `params.extra_images` as absolute paths, which nothing in `static/` ever read.
+  Three pictures sat on disk, unreachable from the canvas, the history list and
+  the detail overlay alike.
+- The record now publishes `image_urls` / `thumb_urls` (one per frame, in the
+  order the engine made them) plus `output_count`, and drops the paths.
+  `image_url` / `thumb_url` stay as the first frame, so older callers keep
+  working. The extras were always in the database, so **existing records light
+  up as they are — no migration**.
+- Canvas: a frame strip under the picture, on its own row so the chooser never
+  covers what it chooses between. Click a tile to switch the canvas; the
+  toolbar's download and send-to-edit follow the selection. It stays hidden for
+  a single-frame run, where there is nothing to choose.
+- History: a `×N` badge on the thumbnail, because the row can only show one of
+  them and "there are three more" is the useful fact.
+- Detail overlay: the filmstrip is no longer edit-only. It lists **every frame
+  of the run, then the references**, each group numbered from 1 with a wider gap
+  at the seam. A generation with four frames therefore gets a strip too. The
+  footer names the frame its buttons will act on ("Frame 3 of 4") and its
+  download / send-to-edit act on the tile on screen rather than always the
+  first.
+- **Edit can make several frames too.** The sampling section is shared by both
+  modes, so the control was always reachable while editing and the engine always
+  honoured it; verified against a real run that an edit with `num_images=3`
+  produces three distinct pictures, laid out as `frame frame frame │ reference`.
+- `History.delete()` now removes the extra frames. It only unlinked
+  `image_path` / `thumb_path` / `ref_paths`, so deleting a four-frame run left
+  three pictures and three thumbnails behind, invisible to every screen.
+- **Security:** the extra-frame fallback in the output/thumb routes joined the
+  request path onto the outputs folder unchecked, so `GET
+  /api/outputs/..%5Csecret` returned a file from outside it. The name must now
+  match the id shape (`16 hex`, optionally `_<n>`).
+
 ### Canvas
 - Zoom viewport: fit / 1:1 / stepped zoom / cursor-anchored `⌘`+wheel / drag to
   pan / double-click to toggle. Zoom bar with a live percentage.

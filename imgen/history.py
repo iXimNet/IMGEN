@@ -172,6 +172,20 @@ class History:
                 Path(ref).unlink(missing_ok=True)
             except OSError:
                 pass
+        # A multi-image run keeps its extra frames here, not in a column of
+        # their own — and nothing else ever cleans them up. Removing the row
+        # without these would leave the pictures on disk forever, invisible to
+        # every screen and to the delete itself.
+        for extra in (record.get("params") or {}).get("extra_images") or []:
+            if not isinstance(extra, dict):
+                continue
+            for key in ("image_path", "thumb_path"):
+                path = extra.get(key)
+                if path:
+                    try:
+                        Path(path).unlink(missing_ok=True)
+                    except OSError:
+                        pass
         with self._connect() as conn:
             conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
         return True

@@ -39,6 +39,11 @@
     offline: false,
     pollTimer: 0,
     currentImage: null,
+    /* Every frame the last run produced, and which one the canvas is showing.
+       A run with num_images > 1 makes several pictures in one go; the stage
+       strip switches between them and the toolbar follows the selection. */
+    outputFrames: [],
+    outputIndex: 0,
     hasResult: false,
     busy: false,
     history: [],
@@ -47,6 +52,11 @@
     historyLoading: false,
     presetCat: null,
     detailId: null,
+    /* Which picture the open detail overlay is showing. The footer's actions
+       follow it, so a download saves what is on screen. */
+    detailCurrent: { url: null, index: 0 },
+    /* Set while the viewer shows a reference instead of a frame. */
+    detailRefIndex: null,
     download: { key: null, pct: 0, bytes: 0, total: null },
   };
 
@@ -328,6 +338,7 @@
     $("dStatusText").textContent = tr(status[0]);
     renderDetailMeta(item);
     renderDetailRefs(item);
+    renderDetailFootNote(item);
     renderDetailFooter(item);
   }
 
@@ -370,6 +381,9 @@
     // leave "VAE 解码中…" on screen in English mode.
     renderPhase();
     renderTools();
+    // The frame strip's labels are spoken, not drawn — they still have to
+    // follow the language, or a screen reader announces the old one.
+    renderFrameStrip();
     renderHistory();
     renderPresets();
     renderModels();
@@ -530,17 +544,62 @@
     $("empty").classList.toggle("hidden", S.hasResult);
     $("viewport").classList.toggle("hidden", !S.hasResult);
     $("zoombar").classList.toggle("hidden", !S.hasResult);
+    // One picture needs no chooser; the strip would only repeat what the
+    // canvas already shows.
+    $("frameStrip").classList.toggle("hidden", !S.hasResult || S.outputFrames.length < 2);
   }
 
-  function showResult(url, w, h) {
-    S.currentImage = url;
-    S.hasResult = true;
+  /* The frames of the last run, as a row of thumbnails under the canvas.
+     A separate row rather than a floating overlay: the pictures are the point
+     of the strip, and covering the canvas to show them would be a poor trade. */
+  function renderFrameStrip() {
+    const box = $("frameList");
+    if (!box) return;
+    box.innerHTML = "";
+    // Nothing to choose between: leave the strip empty rather than hidden with
+    // stale thumbnails of a previous run inside it.
+    if (S.outputFrames.length < 2) return;
+    S.outputFrames.forEach((frame, index) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = `reftile${index === S.outputIndex ? " on" : ""}`;
+      btn.dataset.pos = String(index);
+      btn.innerHTML = `<img src="${esc(frame.thumb || frame.url)}" alt="" loading="lazy" /><i>${index + 1}</i>`;
+      btn.setAttribute("aria-label", tfx("tileFrame", { n: index + 1 }));
+      if (index === S.outputIndex) btn.setAttribute("aria-current", "true");
+      btn.onclick = () => selectFrame(index);
+      box.appendChild(btn);
+    });
+  }
+
+  function selectFrame(index) {
+    const frame = S.outputFrames[index];
+    if (!frame) return;
+    S.outputIndex = index;
+    S.currentImage = frame.url;
     const wrap = $("zoomwrap");
     wrap.classList.remove("enter");
     void wrap.offsetWidth;
     wrap.classList.add("enter");
-    canvasZoom.load(w, h, url);
+    canvasZoom.load(frame.w || S.width, frame.h || S.height, frame.url);
+    renderFrameStrip();
+  }
+
+  /* `frames` is every picture of the run; the first one opens on the canvas.
+     Passing one frame is the ordinary case and behaves exactly as before. */
+  function showResult(frames, w, h) {
+    const list = (Array.isArray(frames) ? frames : [frames]).filter(Boolean);
+    S.outputFrames = list.map((entry) => (typeof entry === "string" ? { url: entry } : entry));
+    S.outputIndex = 0;
+    S.currentImage = (S.outputFrames[0] || {}).url || null;
+    S.hasResult = !!S.currentImage;
+    const wrap = $("zoomwrap");
+    wrap.classList.remove("enter");
+    void wrap.offsetWidth;
+    wrap.classList.add("enter");
+    if (S.currentImage) canvasZoom.load(w, h, S.currentImage);
     renderStage();
+    renderFrameStrip();
     renderTools();
   }
 
@@ -649,6 +708,9 @@
         item.mode === "edit" ? tr("edit") : tr("generate"),
         item.width && item.height ? `${item.width}×${item.height}` : "",
       ].filter(Boolean);
+      // A run that made several pictures says so on the thumbnail: the row can
+      // only show one of them, and "there are three more" is the useful fact.
+      const count = item.output_count || 1;
 
       const row = document.createElement("div");
       row.className = `hrow${S.detailId === item.id ? " on" : ""}`;
@@ -656,7 +718,8 @@
       row.tabIndex = 0;
       row.setAttribute("role", "button");
       row.innerHTML =
-        `<div class="th">${thumb ? `<img src="${esc(thumb)}" alt="" loading="lazy" />` : ""}</div>` +
+        `<div class="th">${thumb ? `<img src="${esc(thumb)}" alt="" loading="lazy" />` : ""}` +
+        `${count > 1 ? `<i class="thcount">×${count}</i>` : ""}</div>` +
         `<div class="mt"><b title="${esc(title)}">${esc(title)}</b>` +
         `<span class="mrow">${meta.map((part) => `<i>${esc(part)}</i>`).join("")}` +
         `<i class="when" title="${esc(fullTime(item.created_at))}">${esc(clockOf(item.created_at))}</i></span></div>`;
@@ -782,6 +845,8 @@
 
   function openDetail(item) {
     S.detailId = item.id;
+    // A record opens on its first frame; the strip switches from there.
+    S.detailCurrent = { url: item.image_url || null, index: 0 };
     const status = STATUS[item.status] || STATUS.succeeded;
     $("dTitle").textContent = item.mode === "edit" ? tr("detailTitleEdit") : tr("detailTitleGen");
     $("dStatus").className = `pill ${status[2]}`.trim();
@@ -795,7 +860,7 @@
 
     renderDetailMeta(item);
     renderDetailRefs(item);
-    showDetailSource(item, null);
+    showDetailSource(item, 0, null);
     renderDetailFooter(item);
     $("detail").classList.remove("hidden");
     syncOverlayState();
@@ -877,37 +942,61 @@
     if ($("dCopyNegative")) $("dCopyNegative").onclick = () => copyText(item.negative_prompt, tr("negative"));
   }
 
-  /* Reference filmstrip. Which tile is showing is carried by the `on` class
-     (a highlight), so no text label is needed. `aria-current` says the same
-     thing to assistive tech. */
+  /* The detail filmstrip. It carries everything the record has: every frame of
+     the run, then the references it was given — a multi-image generation has
+     just as much to choose from as an edit does.
+
+     Frames come first and references after, in that order, because that is the
+     order they were made. `kind` + `index` say which group a tile belongs to;
+     the two groups number themselves from 1, and a wider gap marks the seam
+     between them. Which tile is showing is carried by the `on` class (a
+     highlight), so no text label is needed. `aria-current` says the same thing
+     to assistive tech. */
   function renderDetailRefs(item) {
-    const urls = item.ref_urls || [];
-    const show = item.mode === "edit" && urls.length > 0;
+    const outs = item.image_urls || (item.image_url ? [item.image_url] : []);
+    const refs = item.ref_urls || [];
+    const show = outs.length + refs.length > 1;
     $("dRefs").classList.toggle("hidden", !show);
     if (!show) return;
     const list = $("dRefList");
     list.innerHTML = "";
-    const tiles = [{ url: item.image_url, label: tr("tileOutput"), index: null }]
-      .concat(urls.map((url, index) => ({ url, label: String(index + 1), index })));
-    tiles.forEach((tile, position) => {
+    const tiles = outs
+      .map((url, index) => ({ url, kind: "out", index, pos: index, label: String(index + 1) }))
+      .concat(refs.map((url, index) => ({
+        url, kind: "ref", index, pos: outs.length + index, label: String(index + 1),
+      })));
+    tiles.forEach((tile) => {
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.className = `reftile${position === 0 ? " on" : ""}`;
-      btn.dataset.pos = String(position);
+      // The first reference opens a new group; the gap and the hairline come
+      // from CSS rather than an extra element, so every child of the strip
+      // stays a tile.
+      btn.className = `reftile${tile.kind === "ref" && tile.index === 0 && outs.length > 0 ? " grp-start" : ""}`;
+      btn.dataset.kind = tile.kind;
+      btn.dataset.pos = String(tile.pos);
+      btn.dataset.index = String(tile.index);
       btn.innerHTML = `<img src="${esc(tile.url)}" alt="" loading="lazy" /><i>${esc(tile.label)}</i>`;
       // Describes the tile itself; `aria-current` marks the one on screen.
-      btn.setAttribute("aria-label", tile.index == null ? tr("tileOutput") : tfx("tileRef", { n: tile.index + 1 }));
-      btn.onclick = () => showDetailSource(item, tile.index);
+      btn.setAttribute("aria-label", tile.kind === "out"
+        ? tfx("tileFrame", { n: tile.index + 1 })
+        : tfx("tileRef", { n: tile.index + 1 }));
+      btn.onclick = () => (tile.kind === "out"
+        ? showDetailSource(item, tile.index, null)
+        : showDetailSource(item, null, tile.index));
       list.appendChild(btn);
     });
-    syncRefTileHighlight(0);
+    syncDetailTiles();
   }
 
   /* The tile on screen: brighter frame, full opacity, and a slight lift. The
-     rest stay dimmed so the current one reads at a glance. */
-  function syncRefTileHighlight(active) {
+     rest stay dimmed so the current one reads at a glance. Frames and
+     references are separate index spaces, so the kind is part of the match. */
+  function syncDetailTiles() {
+    const ref = S.detailRefIndex;
     $$("#dRefList .reftile").forEach((tile) => {
-      const on = Number(tile.dataset.pos) === active;
+      const isFrame = tile.dataset.kind === "out";
+      const pos = Number(tile.dataset.index);
+      const on = isFrame ? (ref == null && pos === S.detailCurrent.index) : (ref != null && pos === ref);
       tile.classList.toggle("on", on);
       if (on) tile.setAttribute("aria-current", "true");
       else tile.removeAttribute("aria-current");
@@ -915,18 +1004,29 @@
   }
 
   /* A record with no image (failed or cancelled) must not inherit whatever the
-     viewer was showing before. `index == null` means the output itself. */
-  function showDetailSource(item, index) {
-    const url = index == null ? item.image_url : (item.ref_urls || [])[index];
-    const viewingOutput = index == null;
-    const active = index == null ? 0 : index + 1;
+     viewer was showing before. Exactly one of `outIndex` / `refIndex` is set:
+     the first picks a frame of the run, the second a reference image. */
+  function showDetailSource(item, outIndex, refIndex) {
+    const outs = item.image_urls || (item.image_url ? [item.image_url] : []);
+    const refs = item.ref_urls || [];
+    const viewingOutput = refIndex == null;
+    const url = viewingOutput ? outs[outIndex || 0] : refs[refIndex];
+    // The footer's download / send-to-edit act on what is on screen, and the
+    // strip highlights it. `detailRefIndex` is null while a frame is showing.
+    if (viewingOutput) {
+      S.detailCurrent = { url: url || null, index: outIndex || 0 };
+      S.detailRefIndex = null;
+      renderDetailFootNote(item);
+    } else {
+      S.detailRefIndex = refIndex;
+    }
     if (!url) {
       detailZoom.clear();
       $("dview").classList.add("no-image");
       $("dview").querySelector(".vmain").classList.add("no-image");
       $("dEmpty").classList.remove("hidden");
       $("dEmptyText").textContent = viewingOutput ? tr("noOutput") : tr("noRefImage");
-      syncRefTileHighlight(active);
+      syncDetailTiles();
       return;
     }
     $("dview").classList.remove("no-image");
@@ -936,25 +1036,44 @@
     // its own size, so treat these as a first guess only — the viewer replaces
     // them with the decoded bitmap's real dimensions once it loads.
     detailZoom.load(item.width || 1024, item.height || 1024, url);
-    syncRefTileHighlight(active);
+    syncDetailTiles();
   }
+
+  /* Which picture the footer acts on. The buttons follow the tile the viewer is
+     showing, so "download" means the one on screen rather than always the
+     first — the whole point of a multi-image run is choosing between them. */
+  const detailFrame = () => S.detailCurrent;
 
   function renderDetailFooter(item) {
     // Nothing to download, reuse as an image, or send to edit without a picture.
     const hasImage = !!item.image_url;
+    const multi = (item.output_count || 1) > 1;
     $("dFoot").innerHTML =
       `<button type="button" class="btn danger" id="dDelete">${icon("i-trash")}<span class="lbl">${esc(tr("delete"))}</span></button>` +
       `<span class="grow"></span>` +
+      `<span class="dfoot-note${multi ? "" : " hidden"}" id="dFootNote"></span>` +
       `<button type="button" class="btn" id="dDownload"${hasImage ? "" : " disabled"}>${icon("i-download")}<span class="lbl">${esc(tr("downloadImg"))}</span></button>` +
       `<button type="button" class="btn" id="dReuse">${icon("i-reuse")}<span class="lbl">${esc(tr("reuse"))}</span></button>` +
       `<button type="button" class="btn" id="dSend"${hasImage ? "" : " disabled"}>${icon("i-send")}<span class="lbl">${esc(tr("sendEdit"))}</span></button>`;
     if (!hasImage) {
       ["dDownload", "dSend"].forEach((id) => $(id).classList.add("dim"));
     }
-    $("dDownload").onclick = () => downloadItem(item);
+    $("dDownload").onclick = () => downloadItem({ ...item, image_url: detailFrame().url || item.image_url });
     $("dReuse").onclick = () => { closeDetail(); applyItemParams(item); };
-    $("dSend").onclick = () => { if (hasImage) { closeDetail(); sendToEdit(item.image_url, item.prompt); } };
+    $("dSend").onclick = () => { if (hasImage) { closeDetail(); sendToEdit(detailFrame().url || item.image_url, item.prompt); } };
     $("dDelete").onclick = () => askDelete(item);
+    renderDetailFootNote(item);
+  }
+
+  /* The footer says which frame the buttons will act on, so a download is never
+     a surprise. It stays quiet for a single-image run, where there is no
+     ambiguity to resolve. */
+  function renderDetailFootNote(item) {
+    const note = $("dFootNote");
+    if (!note) return;
+    const total = item.output_count || 1;
+    if (total < 2) return;
+    note.textContent = tfx("frameOfTotal", { n: detailFrame().index + 1, total });
   }
 
   function askDelete(item) {
@@ -1849,9 +1968,21 @@
     try { item = await api(`/api/jobs/${jobId}`); } catch (_) { /* fall back to local state */ }
     const w = (item && item.width) || S.width;
     const h = (item && item.height) || S.height;
-    showResult(`${imageUrl || `/api/outputs/${jobId}`}?t=${Date.now()}`, w, h);
+    // A multi-image run made several pictures; the record lists them all. Fall
+    // back to the single URL from the event when the row cannot be read.
+    const stamp = Date.now();
+    const urls = (item && item.image_urls) || (imageUrl ? [imageUrl] : [`/api/outputs/${jobId}`]);
+    const thumbs = (item && item.thumb_urls) || [];
+    const frames = urls.map((url, index) => ({
+      url: `${url}?t=${stamp}`,
+      thumb: thumbs[index] ? `${thumbs[index]}?t=${stamp}` : "",
+      w, h,
+    }));
+    showResult(frames, w, h);
     const seconds = item && item.duration_ms ? (item.duration_ms / 1000).toFixed(1) : ((Date.now() - started) / 1000).toFixed(1);
-    toast("ok", tr("toastDone"), tfx("toastDoneDetail", { w, h, s: seconds }));
+    const count = frames.length;
+    toast("ok", count > 1 ? tfx("toastDoneMulti", { n: count }) : tr("toastDone"),
+      tfx("toastDoneDetail", { w, h, s: seconds }));
     await loadHistory().catch(() => {});
   }
 
