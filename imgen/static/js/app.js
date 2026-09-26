@@ -26,6 +26,9 @@
     refs: [],
     jobId: null,
     startedAt: 0,
+    decoding: false,
+    decodeAt: 0,
+    decodeTimer: 0,
     currentImage: null,
     hasResult: false,
     busy: false,
@@ -1689,7 +1692,37 @@
     S.busy = busy;
     renderRun();
     renderTools();
+    // Every exit path (complete, cancel, error) funnels through here; the
+    // decode state must never outlive the job that started it.
+    if (!busy) stopDecodeUi();
     if (!busy) setTimeout(() => $("progress").classList.add("hidden"), 800);
+  }
+
+  function startDecodeUi(slow) {
+    S.decoding = true;
+    S.decodeAt = Date.now();
+    $("progressPhase").textContent = tr("phaseDecodingRun");
+    $("progressTrack").classList.add("pulse");
+    const render = () => {
+      const seconds = ((Date.now() - S.decodeAt) / 1000).toFixed(0);
+      $("progressText").textContent = [
+        tfx("metaElapsed", { s: seconds }),
+        slow ? tr("decodingSlowNote") : "",
+      ].filter(Boolean).join(" · ");
+    };
+    render();
+    if (S.decodeTimer) clearInterval(S.decodeTimer);
+    S.decodeTimer = setInterval(render, 1000);
+  }
+
+  function stopDecodeUi() {
+    if (S.decodeTimer) {
+      clearInterval(S.decodeTimer);
+      S.decodeTimer = 0;
+    }
+    S.decoding = false;
+    const track = $("progressTrack");
+    if (track) track.classList.remove("pulse");
   }
 
   function buildForm() {
@@ -1737,6 +1770,9 @@
     $("progressText").textContent = "";
     $("progressBar").style.width = "2%";
     S.startedAt = Date.now();
+    // A fresh run must start from a clean slate even if a previous decode
+    // UI state somehow survived.
+    stopDecodeUi();
     toast("ok", tr("toastQueued"), tfx("toastQueuedDetail", {
       model: modelLabel(S.modelKey), w: S.width, h: S.height, steps: S.steps,
     }));
@@ -1779,12 +1815,21 @@
       if (msg.type === "generate_start") {
         $("progressPhase").textContent = tr("phaseLoading");
       }
+      if (msg.type === "generate_phase" && msg.phase === "decode") {
+        // The real decode phase: announced by the engine the moment the VAE
+        // starts decoding. There is no per-step progress here — the sampler's
+        // 100% bar freezes, so switch to a sweeping bar and a live timer.
+        startDecodeUi(!!msg.slow);
+      }
       if (msg.type === "generate_progress") {
         const total = msg.total || S.steps;
         const step = msg.step || 0;
         const pct = total ? step / total : 0;
         const elapsed = S.startedAt ? (Date.now() - S.startedAt) / 1000 : 0;
-        $("progressPhase").textContent = step <= 2 ? tr("phaseLoading") : pct > 0.92 ? tr("phaseDecoding") : tr("phaseSampling");
+        // Sampler steps only. The old "pct > 0.92 → decoding" guess renamed
+        // the phase while the sampler was still running and said nothing
+        // during the real (possibly minutes-long) decode.
+        $("progressPhase").textContent = step <= 2 ? tr("phaseLoading") : tr("phaseSampling");
         $("progressBar").style.width = `${Math.round(pct * 100)}%`;
         $("progressText").textContent = [
           tfx("metaStep", { s: step, t: total }),

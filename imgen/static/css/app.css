@@ -356,6 +356,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; }
 .prow span { margin-left: auto; font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim); }
 .progress .bar { height: 3px; background: #25282c; border-radius: 99px; overflow: hidden; margin-top: 9px; }
 .progress .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.3s ease; }
+/* VAE decode has no per-step progress: sweep instead of a frozen 100% bar. */
+.progress .bar.pulse i { width: 34% !important; animation: progSweep 1.15s ease-in-out infinite; }
 
 .toolbar { display: flex; gap: 8px; justify-content: center; padding: 0 16px 15px; }
 .viewport::-webkit-scrollbar { width: 11px; height: 11px; }

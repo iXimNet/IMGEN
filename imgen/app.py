@@ -95,6 +95,10 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
     # whenever the setting changes, so every caller sees the same list.
     set_extra_weight_dirs(config.load().get("extra_weight_dirs"))
     history = History(paths)
+    # A previous process may have died with jobs marked "running" (console
+    # window closed mid-decode, crash, reboot). Nothing survives the process,
+    # so flip those rows to failed before the studio ever reads them.
+    history.reconcile_running()
     bus = EventBus()
     engine = Engine(demo=demo)
     download_lock = threading.Lock()

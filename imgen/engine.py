@@ -342,6 +342,12 @@ class Engine:
                             "total": min(steps, 8),
                         }
                     )
+                # The real pipeline announces the VAE decode (see _run_pipe);
+                # demo keeps the same event shape so the studio — and its
+                # browser tests — exercise one code path. The short pause makes
+                # the decode state observable instead of a single-frame flash.
+                callback({"type": "generate_phase", "phase": "decode", "slow": False})
+                time.sleep(0.5)
             else:
                 self.load(model_key, hub, callback=callback)
                 pipe = self._pipe
@@ -396,6 +402,20 @@ class Engine:
             }
         finally:
             self._busy = False
+
+    def _cpu_decode(self) -> bool:
+        """True when the resident pipeline decodes its VAE on the CPU.
+
+        INT4 group offload (small CUDA cards, <=10 GB) keeps the VAE on the CPU
+        to protect VRAM, so a 1024px decode there can take minutes. INT8 and
+        BF16 model-offload move the whole VAE onto the GPU when its turn comes,
+        which is fast; only the INT4 small-card recipe pays the slow path.
+        """
+        loaded = self._loaded or {}
+        if loaded.get("loader") == "int4":
+            runtime = loaded.get("runtime") or {}
+            return runtime.get("offload") == "group"
+        return False
 
     def _run_pipe(
         self,
@@ -452,7 +472,39 @@ class Engine:
         if "callback_on_step_end" in names:
             kwargs["callback_on_step_end"] = on_step_end
 
-        result = pipe(**kwargs)
+        # The sampler reports per step, but the VAE decode afterwards used to
+        # be a silent stretch: the studio froze on "100%, ~0s left" while a
+        # small-GPU INT4 run decoded on the CPU for minutes. Wrap the VAE's
+        # decode so the phase is announced the moment it is actually entered.
+        slow_decode = self._cpu_decode()
+        vae = getattr(pipe, "vae", None)
+        original_decode = getattr(vae, "decode", None) if vae is not None else None
+        # INT4 group offload stores an instance-level CPU-decode wrapper on the
+        # VAE (a plain function, not the class method). Remember that so the
+        # restore below re-attaches the exact callable that was there before.
+        instance_level = vae is not None and "decode" in vars(vae)
+        announced = False
+
+        def decode_with_phase(latents, *args, **kw):
+            nonlocal announced
+            if not announced:
+                announced = True
+                callback({"type": "generate_phase", "phase": "decode", "slow": slow_decode})
+            return original_decode(latents, *args, **kw)
+
+        if vae is not None and original_decode is not None:
+            vae.decode = decode_with_phase
+        try:
+            result = pipe(**kwargs)
+        finally:
+            if vae is not None and original_decode is not None:
+                if instance_level:
+                    vae.decode = original_decode
+                else:
+                    # Drop the shadowing instance attribute; the class method
+                    # shows through again.
+                    vars(vae).pop("decode", None)
+
         images_out = list(result.images)
         return images_out
 

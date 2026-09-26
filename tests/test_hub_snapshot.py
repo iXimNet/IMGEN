@@ -247,10 +247,14 @@ def test_ignore_patterns_agree_across_hubs():
     """Both hubs must skip the same set, or a source switch changes the bytes.
 
     Verified through each hub's own matcher: Hugging Face uses
-    ``huggingface_hub.utils._paths.fnmatchcase`` and ModelScope uses
+    ``huggingface_hub.utils._paths``'s matcher (``fnmatchcase`` before 1.x,
+    renamed to plain ``fnmatch`` after) and ModelScope uses
     ``modelscope_hub._download._matches_patterns``.
     """
-    hf_fnmatch = pytest.importorskip("huggingface_hub.utils._paths").fnmatchcase
+    hf_paths = pytest.importorskip("huggingface_hub.utils._paths")
+    # The helper was renamed between huggingface_hub generations; resolve
+    # whichever one this install ships so the pin stays version-agnostic.
+    hf_fnmatch = getattr(hf_paths, "fnmatchcase", None) or hf_paths.fnmatch
 
     def hf_ignores(path: str) -> bool:
         return any(hf_fnmatch(path, pattern) for pattern in HF_IGNORE_PATTERNS)

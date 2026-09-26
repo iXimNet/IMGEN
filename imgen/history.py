@@ -109,6 +109,23 @@ class History:
             conn.execute(f"UPDATE jobs SET {assignments} WHERE id = :id", fields)
         return self.get(job_id)
 
+    def reconcile_running(self, error: str = "Interrupted: the server exited mid-job.") -> int:
+        """Rows still on "running" can only be leftovers of a dead process.
+
+        A job executes inside one server process, so nothing that survives a
+        restart can still be working on it. Closing the console window
+        mid-decode, a crash, or a forced reboot would otherwise leave the row
+        claiming a running job forever — misleading the studio and anyone
+        diagnosing a slow decode. Flip them to failed once at startup, before
+        any new job can be accepted.
+        """
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE jobs SET status = 'failed', error = :error WHERE status = 'running'",
+                {"error": error},
+            )
+            return int(cursor.rowcount or 0)
+
     def get(self, job_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()

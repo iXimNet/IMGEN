@@ -203,6 +203,22 @@
   scrollbar itself stays hidden.
 
 ### Fixes
+- **The VAE decode no longer looks like a hang.** On small-GPU INT4 runs the
+  VAE decodes on the CPU (group offload pins it there to protect VRAM), which
+  takes minutes at 1024px — and nothing said so: the sampler's last step froze
+  the studio on "100%, ~0s left" while the decode ran silently, and the
+  "VAE 解码" label shown during sampling was only a `pct > 0.92` guess. The
+  engine now wraps the VAE's decode and announces a real `generate_phase`
+  event the moment it is entered (flagging the slow CPU case), restoring the
+  exact callable it borrowed — including INT4's own instance-level CPU-decode
+  wrapper. The studio answers with a sweeping bar, a live decode timer and, on
+  CPU-decode runs, a "can take minutes" note; sampling steps always read
+  采样中, the fake label is gone.
+- **Restarting mid-job no longer leaves phantom "running" rows.** A job lives
+  inside one server process, so closing the console window during a slow
+  decode left the row claiming a running job forever — which misread every
+  later diagnosis. Startup flips leftover running rows to failed with a
+  readable reason before the studio can read them.
 - **Switching language now repaints everything that reads the language.**
   `applyI18n()` re-ran a hand-picked list of renderers, and the scale chips
   (`renderScale`) were not on it, so 原生 2K / 1K kept the old language until the
