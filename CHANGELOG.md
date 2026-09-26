@@ -173,6 +173,24 @@
   cache always outranks an extra folder when both hold a copy. A model whose
   weights come from an added folder reads "ready · from another folder" on its
   row and generates from there directly.
+- **Folders named after their precision are read by content.** A working copy is
+  often called `bf16` or `int8` rather than after its repo, and name-anchored
+  probing could never match one — the folder was accepted as a search path and
+  then found nothing, forever. Such a folder is now sniffed instead: the
+  snapshot's own `model_index.json` has to name the Qwen-Image-2.1 pipeline, and
+  its `conversion.json` has to say which precision it is (`bitsandbytes` → INT8,
+  `sdnq`/`uint4` → INT4, no conversion metadata → BF16). Anything else is
+  refused rather than guessed at, so a quantised snapshot that does not record
+  its method is left alone — INT8 and INT4 are not distinguishable from file
+  names, and loading the wrong one is worse than asking for a rename. Named
+  candidates are still probed first, so a folder that does say who it is is
+  never overruled by an unnamed sibling. The scan descends up to three levels
+  (skipping dot-folders), so a dump that keeps a tool folder in between is
+  reached too, and its result is cached for a few seconds — one walk answers
+  every model and both hubs, instead of re-reading the disk per lookup.
+- `dirNoModels` no longer promises "the folder is still searched". That was true
+  only while every folder was name-matched; now that unnamed folders are read,
+  the honest answer is that nothing usable was found in it.
 
 ### Corrected defaults — Image21-INT8 errata (2026-09-24)
 - **VAE tiling now defaults to off and nothing turns it on implicitly.** The card

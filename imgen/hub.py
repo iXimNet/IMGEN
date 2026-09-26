@@ -7,8 +7,8 @@ import json
 import os
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from .constants import HUBS, MODELS, repo_id
 
@@ -271,6 +271,10 @@ def set_extra_weight_dirs(paths: list[str | Path] | None) -> list[Path]:
     cleaned = _unique_paths(cleaned)
     with _EXTRA_LOCK:
         _EXTRA_ROOTS = cleaned
+    # The folder list just changed, so any sniffed answer about the old list is
+    # stale by definition — drop it rather than let the user wait out the TTL.
+    with _SNIFF_LOCK:
+        _SNIFF_CACHE.clear()
     return cleaned
 
 
@@ -313,7 +317,7 @@ def _candidates_under(root: Path, repo: str, hub: str) -> list[Path]:
     return out
 
 
-def _extra_candidates(root: Path, repo: str) -> list[Path]:
+def _extra_candidates(root: Path, repo: str, model_key: str | None = None) -> list[Path]:
     """Directories to probe under a user-added root, most specific first.
 
     A user's folder may be a finished snapshot, a hub cache, or anything in
@@ -325,6 +329,12 @@ def _extra_candidates(root: Path, repo: str) -> list[Path]:
     itself is only probed when its own name identifies the repo: descending
     from an arbitrary folder would claim whatever model happens to sit inside,
     so `E:/stuff/Image21-INT4` must not answer a lookup for Qwen-Image-2.1.
+
+    A folder named after neither layout (``bf16``, ``int8``, a hand-made dump)
+    still gets a chance through `model_key`: its contents are sniffed, and only
+    a snapshot whose own metadata names this model is accepted. Named
+    candidates stay ahead of sniffed ones, so a folder that does say who it is
+    is never overruled by one that does not.
     """
     out: list[Path] = []
     for hub in HUBS:
@@ -335,7 +345,13 @@ def _extra_candidates(root: Path, repo: str) -> list[Path]:
     names = {repo.split("/")[-1].lower(), repo.replace("/", "--").lower()}
     if root.name.lower() in names:
         out.append(root)
-    return _unique_paths(out)
+    out = _unique_paths(out)
+    if model_key:
+        named = {str(item) for item in out}
+        out.extend(
+            path for path in _sniff_candidates(root, model_key) if str(path) not in named
+        )
+    return out
 
 
 def _snapshot_candidates(model_key: str, hub: str, cache_root: Path | None = None) -> list[Path]:
@@ -352,7 +368,7 @@ def _snapshot_candidates(model_key: str, hub: str, cache_root: Path | None = Non
     # The hub's own cache stays first — it is where downloads land, so it is
     # the authoritative copy. User-added directories are the fallback.
     for root in extra_weight_dirs():
-        candidates.extend(_extra_candidates(root, repo))
+        candidates.extend(_extra_candidates(root, repo, model_key))
     if cache_root:
         candidates.insert(0, cache_root / hub / repo.replace("/", os.sep))
     return _unique_paths(candidates)
@@ -372,6 +388,186 @@ def _resolved_belongs(resolved: Path, candidate: Path) -> bool:
     if resolved == candidate:
         return True
     return resolved.parent.parent == candidate and resolved.parent.name == "snapshots"
+
+
+# ---------------------------------------------------------------------------
+# Content sniffing
+#
+# Name-anchored probing only works when a folder is named after its repo. A
+# folder called `bf16` or `int8` holds a perfectly good snapshot and no name to
+# prove which one it is, so the snapshot's own metadata is read instead. This is
+# the *fallback*: every named candidate is tried first, so a folder that does
+# name itself is never second-guessed by one that does not. Identity is proven
+# by the pipeline class (the family) and the conversion metadata (the
+# precision); anything else is refused rather than guessed at, because guessing
+# here would hand the loader another model's weights.
+# ---------------------------------------------------------------------------
+_QWEN_PIPELINE_CLASS = "QwenImage21Pipeline"
+_INT8_MARKERS = ("int8", "bitsandbytes")
+_INT4_MARKERS = ("int4", "uint4", "sdnq")
+# How deep a scan may descend before giving up. Deep enough for a dump that
+# keeps a level of tool or owner folders, shallow enough that pointing the
+# studio at a whole drive cannot turn into a filesystem walk. Dot-folders are
+# skipped outright (`.git`, `.cache`, `.venv`, `._____temp`), which is most of
+# what a scan would otherwise waste time on.
+_SNIFF_MAX_DEPTH = 3
+_SNIFF_SKIP_DIRS = {"node_modules", "__pycache__", "site-packages"}
+# A folder the user just added is scanned once per lookup, and one bootstrap
+# asks about every model and both hubs. The answer only changes when the disk
+# does, so it is cached briefly: long enough to cover a burst of lookups, short
+# enough that a freshly added folder shows up without restarting the studio.
+# The walk identifies *every* snapshot under the folder at once, so the cache is
+# keyed by the folder, not by the model being asked about.
+_SNIFF_TTL = 5.0
+_SNIFF_CACHE: dict[tuple[str, int], tuple[float, dict[str, list[Path]]]] = {}
+_SNIFF_LOCK = threading.Lock()
+
+
+def _is_qwen_image_snapshot(payload: dict) -> bool:
+    """Whether a ``model_index.json`` describes the Qwen-Image-2.1 family."""
+    name = str(payload.get("_class_name") or "").strip()
+    if name == _QWEN_PIPELINE_CLASS:
+        return True
+    if name:
+        # A different pipeline, whatever its components happen to be called.
+        return False
+    # Some exports omit `_class_name`; the transformer component still names the
+    # family, and it is specific enough to stand on its own.
+    transformer = payload.get("transformer")
+    if isinstance(transformer, (list, tuple)):
+        marker = " ".join(str(part) for part in transformer)
+    else:
+        marker = str(transformer or "")
+    return "QwenImage21" in marker
+
+
+def _sniff_precision(snapshot: Path) -> str | None:
+    """Which precision a snapshot holds, from the conversion metadata.
+
+    All three catalog models share one pipeline class, so the only thing that
+    tells them apart on disk is what the quantised releases record about their
+    own conversion. A snapshot that is quantised without saying how is refused:
+    INT8 and INT4 cannot be told apart from file names alone, and loading the
+    wrong one is worse than asking the user to add the folder under its own
+    name.
+    """
+    conversion = snapshot / "conversion.json"
+    if conversion.is_file():
+        try:
+            meta = json.loads(conversion.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(meta, dict):
+            return None
+        text = " ".join(
+            str(meta.get(field) or "") for field in ("method", "weights_dtype")
+        ).lower()
+        if any(marker in text for marker in _INT4_MARKERS):
+            return "image21-int4"
+        if any(marker in text for marker in _INT8_MARKERS):
+            return "image21-int8"
+        return None
+    if any(snapshot.glob("*-quantization.json")):
+        return None
+    return "qwen-image-2.1"
+
+
+def sniff_snapshot_model(snapshot: Path) -> str | None:
+    """Which catalog model a folder holds, read from the folder itself.
+
+    Returns the model key, or ``None`` when the folder is not a snapshot of
+    this family or its precision cannot be read.
+    """
+    index = snapshot / "model_index.json"
+    if not index.is_file():
+        return None
+    try:
+        payload = json.loads(index.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or not _is_qwen_image_snapshot(payload):
+        return None
+    return _sniff_precision(snapshot)
+
+
+def _own_snapshot_dir(folder: Path) -> Path | None:
+    """The snapshot a folder *is*, without guessing at its children.
+
+    ``resolve_snapshot_dir`` descends into a child holding a ``model_index.json``
+    when the folder itself has none. That is right when the caller already knows
+    which repo it wants, but wrong when scanning a folder of unknown contents —
+    the first child would answer for the whole folder. So only the folder itself
+    and its own ``snapshots/<revision>`` layer count here.
+    """
+    if (folder / "model_index.json").is_file():
+        return folder
+    snapshots = folder / "snapshots"
+    if snapshots.is_dir():
+        for revision in sorted(
+            (item for item in snapshots.iterdir() if item.is_dir()),
+            key=lambda item: item.name,
+            reverse=True,
+        ):
+            if (revision / "model_index.json").is_file():
+                return revision
+    return None
+
+
+def _scan_sniffed(root: Path, max_depth: int = _SNIFF_MAX_DEPTH) -> dict[str, list[Path]]:
+    """Every snapshot under a folder, grouped by the model it names itself as.
+
+    One walk answers all models and both hubs, so a bootstrap that asks about
+    six combinations still reads the folder once. Complete snapshots sort first
+    within each model, so a usable copy wins over a partial one regardless of
+    where the folders happen to sit.
+    """
+    cache_key = (str(root), max_depth)
+    now = time.monotonic()
+    with _SNIFF_LOCK:
+        cached = _SNIFF_CACHE.get(cache_key)
+        if cached and now - cached[0] < _SNIFF_TTL:
+            return {key: list(paths) for key, paths in cached[1].items()}
+
+    grouped: dict[str, list[Path]] = {}
+    seen: set[str] = set()
+
+    def visit(folder: Path, depth: int) -> None:
+        snapshot = _own_snapshot_dir(folder)
+        if snapshot is not None:
+            key = str(snapshot)
+            if key not in seen:
+                seen.add(key)
+                model_key = sniff_snapshot_model(snapshot)
+                if model_key:
+                    grouped.setdefault(model_key, []).append(snapshot)
+            # A snapshot's own sub-folders are components, not more snapshots.
+            return
+        if depth <= 0:
+            return
+        try:
+            children = sorted(folder.iterdir())
+        except OSError:
+            return
+        for child in children:
+            # Dot-folders are downloader bookkeeping (`.cache`, `._____temp`)
+            # or tooling state, never a snapshot the user means to share.
+            if not child.is_dir() or child.name.startswith("."):
+                continue
+            if child.name in _SNIFF_SKIP_DIRS:
+                continue
+            visit(child, depth - 1)
+
+    visit(root, max_depth)
+    for paths in grouped.values():
+        paths.sort(key=lambda item: not snapshot_is_complete(item))
+    with _SNIFF_LOCK:
+        _SNIFF_CACHE[cache_key] = (now, {key: list(paths) for key, paths in grouped.items()})
+    return grouped
+
+
+def _sniff_candidates(root: Path, model_key: str, max_depth: int = _SNIFF_MAX_DEPTH) -> list[Path]:
+    """Snapshots under a folder whose own metadata names them as ``model_key``."""
+    return list(_scan_sniffed(root, max_depth).get(model_key, []))
 
 
 def find_snapshot_dir(model_key: str, hub: str, cache_root: Path | None = None) -> Path | None:
@@ -670,7 +866,9 @@ def describe_weight_dir(raw: str | Path) -> dict:
         "path": str(path),
         "ok": True,
         "reason": "ok",
-        "models": [spec["label"] for spec in MODELS.values() if _dir_holds_model(path, spec["key"])],
+        "models": [
+            spec["label"] for spec in MODELS.values() if _dir_holds_model(path, spec["key"])
+        ],
     }
 
 
@@ -680,10 +878,17 @@ def _dir_holds_model(root: Path, model_key: str) -> bool:
     The repo id differs per source (`ixim/...` on Hugging Face,
     `iximbox/...` on ModelScope), so both are probed: a folder written by
     either client counts. The same identity guard as `find_snapshot_dir`
-    applies — a sibling model's snapshot never satisfies another lookup.
+    applies — a sibling model's snapshot never satisfies another lookup — and
+    a folder named after neither layout is accepted only when its own metadata
+    names the model (see `sniff_snapshot_model`).
     """
+    # Sniffed candidates are already proven to be this model's, and the scan
+    # behind them is cached, so they are checked first and without re-walking.
+    for snapshot in _sniff_candidates(root, model_key):
+        if (snapshot / "model_index.json").is_file() and snapshot_is_complete(snapshot):
+            return True
     for hub in HUBS:
-        for candidate in _extra_candidates(root, repo_id(model_key, hub)):
+        for candidate in _extra_candidates(root, repo_id(model_key, hub), model_key):
             resolved = resolve_snapshot_dir(candidate)
             if (
                 (resolved / "model_index.json").exists()

@@ -21,6 +21,7 @@ from imgen.hub import (
     resolve_snapshot_dir,
     set_extra_weight_dirs,
     snapshot_is_complete,
+    sniff_snapshot_model,
 )
 
 
@@ -56,6 +57,35 @@ def _complete_snapshot(root):
         target = root / folder
         target.mkdir(parents=True, exist_ok=True)
         (target / name).write_bytes(b"x" * 2048)
+    return root
+
+
+def _qwen_snapshot(root, precision="bf16"):
+    """A complete snapshot that *identifies itself* the way real ones do.
+
+    Content sniffing reads `model_index.json` for the pipeline family and
+    `conversion.json` for the precision, so a folder that should be recognised
+    by its contents needs both. `precision` is `bf16`, `int8` or `int4`.
+    """
+    _complete_snapshot(root)
+    (root / "model_index.json").write_text(
+        json.dumps(
+            {
+                "_class_name": "QwenImage21Pipeline",
+                "transformer": ["diffusers", "QwenImage21Transformer2DModel"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    if precision == "int8":
+        (root / "conversion.json").write_text(
+            json.dumps({"method": "bitsandbytes LLM.int8"}), encoding="utf-8"
+        )
+    elif precision == "int4":
+        (root / "conversion.json").write_text(
+            json.dumps({"method": "sdnq", "weights_dtype": "uint4"}),
+            encoding="utf-8",
+        )
     return root
 
 
@@ -469,3 +499,152 @@ def test_set_extra_weight_dirs_dedupes_and_skips_blanks(tmp_path):
     assert extra_weight_dirs() == [a, b]
     set_extra_weight_dirs(None)
     assert extra_weight_dirs() == []
+
+
+# ---------------------------------------------------------------------------
+# Content sniffing: folders that do not name the repo they hold
+# ---------------------------------------------------------------------------
+
+
+def test_sniff_snapshot_model_reads_each_precision(tmp_path):
+    """The snapshot's own metadata says which precision it is."""
+    assert sniff_snapshot_model(_qwen_snapshot(tmp_path / "plain")) == "qwen-image-2.1"
+    assert sniff_snapshot_model(_qwen_snapshot(tmp_path / "q8", "int8")) == "image21-int8"
+    assert sniff_snapshot_model(_qwen_snapshot(tmp_path / "q4", "int4")) == "image21-int4"
+
+
+def test_sniff_snapshot_model_refuses_foreign_pipelines(tmp_path):
+    """A folder holding some other model must never be claimed."""
+    other = tmp_path / "sd"
+    other.mkdir()
+    (other / "model_index.json").write_text(
+        json.dumps({"_class_name": "StableDiffusionPipeline"}), encoding="utf-8"
+    )
+    assert sniff_snapshot_model(other) is None
+
+    empty = tmp_path / "not-a-snapshot"
+    empty.mkdir()
+    assert sniff_snapshot_model(empty) is None
+
+
+def test_sniff_snapshot_model_refuses_unknown_quantisation(tmp_path):
+    """Quantised without saying how — INT8 and INT4 are not guessable."""
+    ambiguous = _complete_snapshot(tmp_path / "ambiguous")
+    (ambiguous / "model_index.json").write_text(
+        json.dumps({"_class_name": "QwenImage21Pipeline"}), encoding="utf-8"
+    )
+    (ambiguous / "transformer-quantization.json").write_text("{}", encoding="utf-8")
+    assert sniff_snapshot_model(ambiguous) is None
+
+
+def test_extra_dir_named_by_precision_is_found(tmp_path, monkeypatch):
+    """A folder called `bf16` / `int8` is recognised by its contents."""
+    _isolate_caches(tmp_path, monkeypatch)
+    extra = tmp_path / "weights-store"
+    _qwen_snapshot(extra / "bf16")
+    _qwen_snapshot(extra / "int8", "int8")
+    set_extra_weight_dirs([extra])
+
+    assert model_local_path("qwen-image-2.1", "huggingface") == extra / "bf16"
+    assert model_local_path("image21-int8", "huggingface") == extra / "int8"
+    # Nothing here holds INT4, and the BF16 copy must not answer for it.
+    assert model_local_path("image21-int4", "huggingface") is None
+
+
+def test_extra_dir_sniffing_survives_one_extra_level(tmp_path, monkeypatch):
+    """A dump that keeps a tool folder in between is still reached."""
+    _isolate_caches(tmp_path, monkeypatch)
+    extra = tmp_path / "dumps"
+    _qwen_snapshot(extra / "some-tool" / "Qwen-Image-2.1")
+    set_extra_weight_dirs([extra])
+
+    assert model_local_path("qwen-image-2.1", "huggingface") == (
+        extra / "some-tool" / "Qwen-Image-2.1"
+    )
+
+
+def test_extra_dir_sniffing_does_not_cross_models(tmp_path, monkeypatch):
+    """The whole point of sniffing: precision decides, never the folder order."""
+    _isolate_caches(tmp_path, monkeypatch)
+    extra = tmp_path / "store"
+    _qwen_snapshot(extra / "int8", "int8")
+
+    # The INT8 folder is complete and sits alone, but must not satisfy INT4.
+    assert model_local_path("image21-int4", "huggingface") is None
+    assert describe_weight_dir(extra)["models"] == ["Image21-INT8"]
+
+
+def test_named_candidates_stay_ahead_of_sniffed_ones(tmp_path, monkeypatch):
+    """A folder that names itself is not overruled by an unnamed sibling."""
+    _isolate_caches(tmp_path, monkeypatch)
+    extra = tmp_path / "mixed"
+    named = _qwen_snapshot(extra / "Qwen-Image-2.1")
+    _qwen_snapshot(extra / "bf16")
+    set_extra_weight_dirs([extra])
+
+    assert model_local_path("qwen-image-2.1", "huggingface") == named
+
+
+def test_sniffing_is_cached_until_the_dir_list_changes(tmp_path, monkeypatch):
+    """Repeated lookups do not re-walk the folder; a config change does.
+
+    The cache only saves the *walk*: file existence is still checked on every
+    lookup, so a folder that disappears is noticed. What is asserted here is
+    that the folder is not re-read for every model/hub pair asked about.
+    """
+    _isolate_caches(tmp_path, monkeypatch)
+    extra = tmp_path / "store"
+    _qwen_snapshot(extra / "bf16")
+    set_extra_weight_dirs([extra])
+
+    import imgen.hub as hub_module
+
+    calls = []
+    real_sniff = hub_module.sniff_snapshot_model
+
+    def counting_sniff(path):
+        calls.append(path)
+        return real_sniff(path)
+
+    monkeypatch.setattr(hub_module, "sniff_snapshot_model", counting_sniff)
+
+    model_local_path("qwen-image-2.1", "huggingface")
+    first = len(calls)
+    assert first == 1
+
+    # The same folder list answers from cache, for every model and hub asked.
+    model_local_path("image21-int8", "huggingface")
+    model_local_path("qwen-image-2.1", "modelscope")
+    assert len(calls) == first
+
+    # A new folder list invalidates the cache and forces a fresh walk.
+    set_extra_weight_dirs([extra])
+    model_local_path("qwen-image-2.1", "huggingface")
+    assert len(calls) > first
+
+
+def test_describe_weight_dir_reports_precision_named_folders(tmp_path, monkeypatch):
+    """The settings panel names what it found, not just that it found something."""
+    _isolate_caches(tmp_path, monkeypatch)
+    extra = tmp_path / "weights-store"
+    _qwen_snapshot(extra / "bf16")
+    _qwen_snapshot(extra / "int8", "int8")
+    _qwen_snapshot(extra / "int4", "int4")
+
+    found = describe_weight_dir(extra)
+    assert found["ok"] is True
+    assert sorted(found["models"]) == ["Image21-INT4", "Image21-INT8", "Qwen-Image-2.1"]
+
+
+def test_model_status_marks_sniffed_extra_copy_external(tmp_path, monkeypatch):
+    """A precision-named folder shows up as ready and labelled external."""
+    _isolate_caches(tmp_path, monkeypatch)
+    extra = tmp_path / "weights-store"
+    _qwen_snapshot(extra / "bf16")
+    set_extra_weight_dirs([extra])
+
+    rows = {row["key"]: row for row in model_status("huggingface")}
+    assert rows["qwen-image-2.1"]["downloaded_any"] is True
+    assert rows["qwen-image-2.1"]["external"] is True
+    assert rows["qwen-image-2.1"]["path"] == str(extra / "bf16")
+    assert rows["image21-int8"]["downloaded_any"] is False
