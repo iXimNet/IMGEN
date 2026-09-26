@@ -361,6 +361,7 @@
     renderEnv();
     renderWeightsList();
     renderStorage();
+    renderExtraDirs();
     refreshOpenDetail();
   }
 
@@ -1273,7 +1274,10 @@
       const size = tfx("gb", { n: model.approx_gb });
 
       let meta;
-      if (model.downloaded) meta = `${tr("onDisk")} · ${size}`;
+      // A usable copy in an added folder outranks the per-source wording —
+      // "on disk · from another folder" is where it actually is.
+      if (present && model.external) meta = `${tr("onDiskExtraDir")} · ${size}`;
+      else if (model.downloaded) meta = `${tr("onDisk")} · ${size}`;
       else if (otherHub) meta = `${tfx("onDiskOtherHub", { hub: hubLabel(otherHub) })} · ${size}`;
       else if (model.incomplete_any) meta = `${tfx("weightsIncompleteShort", { n: model.missing_count })} · ${size}`;
       else meta = `${note || tr("notDownloaded")} · ${size}`;
@@ -1324,10 +1328,10 @@
 
   /* Where the selected source keeps its weights, and what decided that path.
      Reads from the backend so HF_HOME / HF_HUB_CACHE / MODELSCOPE_CACHE are
-     reflected instead of a hard-coded guess. */
+     reflected instead of a hard-coded guess. Both the settings sheet and the
+     first-run sheet carry a box; `data-storage="compact"` (first run) shows
+     only the weights line. */
   function renderStorage() {
-    const box = $("storageBlock");
-    if (!box) return;
     const storage = (S.bootstrap && S.bootstrap.storage) || {};
     const info = (storage.hub_dirs || {})[S.hub] || {};
     const origin = info.env_var ? tfx("dirFromEnv", { name: info.env_var }) : tr("dirDefault");
@@ -1337,14 +1341,162 @@
     const missing = info.path && !info.exists
       ? ` <em>${esc(tr("dirMissing"))}</em>`
       : "";
-    box.innerHTML =
-      `<div class="kv">` +
+    const weightsRow =
       `<div class="full"><span class="k">${esc(tr("weightsDir"))}` +
       `<em>${esc(hubLabel(S.hub))} · ${esc(origin)}</em></span>` +
-      `<span class="v"${snapshot ? ` title="${esc(snapshot)}"` : ""}>${esc(info.path || tr("unknown"))}${missing}</span></div>` +
+      `<span class="v"${snapshot ? ` title="${esc(snapshot)}"` : ""}>${esc(info.path || tr("unknown"))}${missing}</span></div>`;
+    const outputsRow =
       `<div class="full"><span class="k">${esc(tr("outputsDir"))}</span>` +
-      `<span class="v">${esc(storage.outputs || tr("unknown"))}</span></div>` +
-      `</div>`;
+      `<span class="v">${esc(storage.outputs || tr("unknown"))}</span></div>`;
+    $$("[data-storage]").forEach((box) => {
+      box.innerHTML =
+        `<div class="kv">${weightsRow}${box.getAttribute("data-storage") === "compact" ? "" : outputsRow}</div>`;
+    });
+  }
+
+  /* Extra weight folders: places that already hold weights, downloaded by
+     hand or by another tool. They are only ever searched — a download always
+     lands in the hub's own cache — so a pre-existing copy shows up as ready
+     without a second download. */
+  function extraDirs() {
+    return (S.bootstrap && S.bootstrap.config && S.bootstrap.config.extra_weight_dirs) || [];
+  }
+
+  const DIR_REASON_KEYS = {
+    empty: "dirReasonEmpty",
+    invalid: "dirReasonInvalid",
+    missing: "dirReasonMissing",
+    not_a_dir: "dirReasonNotADir",
+  };
+
+  function dirReasonText(reason) {
+    return tr(DIR_REASON_KEYS[reason] || "dirReasonInvalid");
+  }
+
+  const extraDirsPanelHtml = () => (
+    `<div class="grp">${esc(tr("extraDirsTitle"))}</div>` +
+    `<div class="dir-list" data-extra-dirs></div>`
+  );
+
+  function renderExtraDirs() {
+    const dirs = (S.bootstrap && S.bootstrap.storage && S.bootstrap.storage.extra_dirs) || [];
+    const joiner = S.lang === "zh" ? "、" : ", ";
+    const rows = dirs.map((dir) => {
+      const note = !dir.ok
+        ? dirReasonText(dir.reason)
+        : dir.models && dir.models.length
+          ? tfx("dirHoldsModels", { models: dir.models.join(joiner) })
+          : tr("dirNoModels");
+      return (
+        `<div class="dir-row">` +
+        `<span class="d-ico">${icon("i-folder", 14)}</span>` +
+        `<span class="d-path" title="${esc(dir.path)}">${esc(dir.path)}</span>` +
+        `<span class="d-note${dir.ok ? "" : " bad"}">${esc(note)}</span>` +
+        `<button type="button" class="d-x" data-rmdir="${esc(dir.path)}" title="${esc(tr("removeDir"))}" aria-label="${esc(tr("removeDir"))}">${icon("i-x", 12)}</button>` +
+        `</div>`
+      );
+    }).join("");
+    $$("[data-extra-dirs]").forEach((box) => {
+      box.innerHTML =
+        (rows || `<p class="sub" style="margin:2px 0 0">${esc(tr("extraDirsEmpty"))}</p>`) +
+        `<div class="dir-add">` +
+        `<input type="text" data-dir-input placeholder="${esc(tr("addDirPlaceholder"))}" spellcheck="false" autocomplete="off" />` +
+        `<button type="button" class="btn sm" data-pickdir title="${esc(tr("browse"))}" aria-label="${esc(tr("browse"))}">${icon("i-folder", 13)}</button>` +
+        `<button type="button" class="btn sm on" data-adddir>${esc(tr("addDir"))}</button>` +
+        `</div>`;
+      bindExtraDirs(box);
+    });
+  }
+
+  async function addWeightDir(raw) {
+    const text = String(raw || "").trim();
+    if (!text) return;
+    // Validate before saving so a bad path is rejected now, not discovered
+    // later as a silently dead search path.
+    let check = null;
+    try {
+      check = await api("/api/weights/check-dir", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: text }),
+      });
+    } catch (err) {
+      reportError(err);
+      return;
+    }
+    const path = (check && check.path) || text;
+    if (!check || !check.ok) {
+      toast("err", tr("toastDirRejected"), dirReasonText(check && check.reason));
+      return;
+    }
+    const list = extraDirs().filter((item) => item !== path);
+    list.push(path);
+    try {
+      await putConfig({ extra_weight_dirs: list });
+      await refreshBootstrap();
+      renderWeightsList(); renderStorage(); renderExtraDirs();
+      const found = check.models && check.models.length
+        ? tfx("dirHoldsModels", { models: check.models.join(S.lang === "zh" ? "、" : ", ") })
+        : tr("dirNoModels");
+      toast("ok", tr("toastDirAdded"), found);
+    } catch (err) {
+      reportError(err);
+    }
+  }
+
+  async function removeWeightDir(path) {
+    const list = extraDirs().filter((item) => item !== path);
+    try {
+      await putConfig({ extra_weight_dirs: list });
+      await refreshBootstrap();
+      renderWeightsList(); renderStorage(); renderExtraDirs();
+      toast("ok", tr("toastDirRemoved"), path);
+    } catch (err) {
+      reportError(err);
+    }
+  }
+
+  function bindExtraDirs(box) {
+    const input = box.querySelector("[data-dir-input]");
+    const addBtn = box.querySelector("[data-adddir]");
+    const pickBtn = box.querySelector("[data-pickdir]");
+    if (addBtn) addBtn.onclick = () => addWeightDir(input && input.value);
+    if (input) {
+      input.onkeydown = (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          addWeightDir(input.value);
+        }
+      };
+    }
+    if (pickBtn) {
+      pickBtn.onclick = async () => {
+        pickBtn.disabled = true;
+        try {
+          const res = await api("/api/weights/pick-dir", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          });
+          if (res && res.ok && res.path) {
+            await addWeightDir(res.path);
+          } else if (res && res.reason === "unavailable") {
+            toast("err", tr("pickDirTitle"), tr("pickDirUnavailable"));
+          }
+          // A cancelled dialog is not news — stay quiet.
+        } catch (err) {
+          reportError(err);
+        } finally {
+          pickBtn.disabled = false;
+        }
+      };
+    }
+    $$("[data-rmdir]", box).forEach((btn) => {
+      btn.onclick = (event) => {
+        event.stopPropagation();
+        removeWeightDir(btn.getAttribute("data-rmdir"));
+      };
+    });
   }
 
   function hubSegmentHtml() {
@@ -1442,9 +1594,10 @@
       `<p class="sub">${esc(tr("sourceHint"))}</p>` +
       `<div class="grp">${esc(tr("weights"))}<span class="sec-val" id="weightsCount" style="margin-left:auto">—</span></div>` +
       weightsPanelHtml() +
+      extraDirsPanelHtml() +
       downloadFieldsHtml() +
       `<div class="grp">${esc(tr("storage"))}</div>` +
-      `<div id="storageBlock"></div>` +
+      `<div id="storageBlock" data-storage="full"></div>` +
       `<p class="sub">${esc(tr("licenseNote"))}</p>`;
     $("settingsFoot").innerHTML =
       `<button type="button" class="btn" id="openFolder">${icon("i-folder")}<span class="lbl">${esc(tr("openFolder"))}</span></button>` +
@@ -1454,6 +1607,7 @@
     bindReveal($("settingsBody"));
     renderWeightsList();
     renderStorage();
+    renderExtraDirs();
     $("openFolder").onclick = revealOutput;
     $("settingsDone").onclick = closeSettings;
     $("settings").classList.remove("hidden");
@@ -1479,8 +1633,10 @@
       `</div>` +
       `<div class="grp">${esc(tr("downloadSource"))}</div>` +
       `<div class="seg" id="firstRunHubs">${hubSegmentHtml()}</div>` +
+      `<div data-storage="compact"></div>` +
       `<div class="grp">${esc(tr("weights"))}<span class="sec-val" id="weightsCount" style="margin-left:auto">—</span></div>` +
       weightsPanelHtml() +
+      extraDirsPanelHtml() +
       downloadFieldsHtml();
     $("firstRunFoot").innerHTML =
       `<span class="grow"></span><button type="button" class="btn on" id="firstRunDone">${esc(tr("enterStudio"))}</button>`;
@@ -1496,6 +1652,8 @@
       };
     });
     renderWeightsList();
+    renderStorage();
+    renderExtraDirs();
     $("firstRunDone").onclick = async () => {
       await persistCredentials();
       try {

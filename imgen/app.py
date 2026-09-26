@@ -32,7 +32,15 @@ from .device import probe
 from .engine import Engine, EngineError
 from .events import EventBus
 from .history import History, new_id
-from .hub import download_model, hub_storage, model_status, resolve_local_hub
+from .hub import (
+    describe_weight_dir,
+    download_model,
+    extra_weight_dirs,
+    hub_storage,
+    model_status,
+    resolve_local_hub,
+    set_extra_weight_dirs,
+)
 from .paths import AppPaths
 from .prompts import catalog as prompt_catalog
 from .sizes import catalog as size_catalog
@@ -83,10 +91,16 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
     paths.ensure()
     config = ConfigStore(paths)
     config.load()
+    # Push the stored folders into the lookup layer once at startup, and again
+    # whenever the setting changes, so every caller sees the same list.
+    set_extra_weight_dirs(config.load().get("extra_weight_dirs"))
     history = History(paths)
     bus = EventBus()
     engine = Engine(demo=demo)
     download_lock = threading.Lock()
+    # Only one OS folder picker may be on screen at a time; Tk roots are not
+    # safe to overlap in separate threads.
+    pick_dir_lock = threading.Lock()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -139,6 +153,7 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
                 row["incomplete_hubs"] = []
                 row["missing_files"] = []
                 row["missing_count"] = 0
+                row["external"] = False
                 row["path"] = "(demo)"
         return {
             "app": APP_NAME,
@@ -153,6 +168,7 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
             "prompts": prompt_catalog(),
             "storage": {
                 "hub_dirs": {key: hub_storage(key) for key in HUBS},
+                "extra_dirs": [describe_weight_dir(item) for item in extra_weight_dirs()],
                 "outputs": str(paths.outputs),
                 "home": str(paths.home),
             },
@@ -176,14 +192,68 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
             "cpu_offload",
             "vae_tiling",
             "last_params",
+            "extra_weight_dirs",
         }
         patch = {k: v for k, v in payload.items() if k in allowed}
         if "hf_token" in patch and patch["hf_token"] == "********":
             patch.pop("hf_token")
         if "ms_token" in patch and patch["ms_token"] == "********":
             patch.pop("ms_token")
-        config.save(patch)
+        saved = config.save(patch)
+        # Keep the lookup layer in step with what was just persisted, otherwise
+        # the UI would report a folder as searched while nothing reads it.
+        if "extra_weight_dirs" in patch:
+            set_extra_weight_dirs(saved.get("extra_weight_dirs"))
         return config.public_view()
+
+    @app.post("/api/weights/check-dir")
+    def check_weight_dir(payload: dict[str, Any]) -> dict[str, Any]:
+        """Classify a folder before it is saved as a weight search path."""
+        return describe_weight_dir(payload.get("path") or "")
+
+    @app.post("/api/weights/pick-dir")
+    async def pick_weight_dir() -> dict[str, Any]:
+        """Open the OS folder picker and describe the chosen folder.
+
+        The dialog blocks its own worker thread, not the event loop, and only
+        one may be open at a time. A picker that cannot be opened (headless
+        host, no desktop session) or is cancelled answers `ok: false` with a
+        reason, and the UI falls back to typing the path in.
+        """
+        if not pick_dir_lock.acquire(blocking=False):
+            raise HTTPException(409, "A folder picker is already open.")
+        try:
+            language = str(config._data.get("language") or "zh").lower()
+            title = "选择权重目录" if language == "zh" else "Choose a weights folder"
+
+            def _pick() -> str | None:
+                try:
+                    import tkinter as tk
+                    from tkinter import filedialog
+                except Exception:
+                    return None
+                try:
+                    root = tk.Tk()
+                except Exception:
+                    return None
+                try:
+                    root.withdraw()
+                    root.attributes("-topmost", True)
+                    return filedialog.askdirectory(parent=root, title=title) or ""
+                finally:
+                    try:
+                        root.destroy()
+                    except Exception:
+                        pass
+
+            folder = await asyncio.to_thread(_pick)
+        finally:
+            pick_dir_lock.release()
+        if folder is None:
+            return {"ok": False, "reason": "unavailable", "path": None, "check": None}
+        if not folder:
+            return {"ok": False, "reason": "cancelled", "path": None, "check": None}
+        return {"ok": True, "reason": "ok", "path": folder, "check": describe_weight_dir(folder)}
 
     @app.post("/api/models/download")
     def api_download(payload: dict[str, Any]) -> dict[str, Any]:

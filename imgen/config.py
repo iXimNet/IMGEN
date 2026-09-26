@@ -20,7 +20,36 @@ DEFAULTS: dict[str, Any] = {
     "cpu_offload": "auto",
     "vae_tiling": "off",
     "last_params": {},
+    # Folders searched for weights that were downloaded by other means. Only
+    # ever read from — a download always lands in the hub's own cache.
+    "extra_weight_dirs": [],
 }
+
+
+def normalize_weight_dirs(value: Any) -> list[str]:
+    """Coerce a stored value into a clean, de-duplicated list of paths.
+
+    Accepts a list (the normal case) or a single string, so a hand-edited
+    config file cannot put the store into a shape the rest of the app cannot
+    iterate.
+    """
+    if value is None:
+        return []
+    if isinstance(value, (str, Path)):
+        items: list[Any] = [value]
+    elif isinstance(value, (list, tuple, set)):
+        items = list(value)
+    else:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
 
 
 class ConfigStore:
@@ -43,11 +72,18 @@ class ConfigStore:
         # withdrawn, so retire the stored value instead of carrying a dead one.
         if str(self._data.get("vae_tiling") or "").strip().lower() == "auto":
             self._data["vae_tiling"] = "off"
+        # Hand-edited config files are a real possibility; a non-list here
+        # would break every lookup, so normalise it on the way in.
+        self._data["extra_weight_dirs"] = normalize_weight_dirs(
+            self._data.get("extra_weight_dirs")
+        )
         return deepcopy(self._data)
 
     def save(self, patch: dict[str, Any] | None = None) -> dict[str, Any]:
         if patch:
             for key, value in patch.items():
+                if key == "extra_weight_dirs":
+                    value = normalize_weight_dirs(value)
                 self._data[key] = value
         self.paths.ensure()
         payload = deepcopy(self._data)

@@ -9,6 +9,8 @@ from imgen.hub import (
     MS_IGNORE_PATTERNS,
     _modelscope_repo_dirs,
     _ms_matches_any,
+    describe_weight_dir,
+    extra_weight_dirs,
     hub_cache_root,
     hub_snapshot_state,
     hub_storage,
@@ -17,6 +19,7 @@ from imgen.hub import (
     model_status,
     resolve_local_hub,
     resolve_snapshot_dir,
+    set_extra_weight_dirs,
     snapshot_is_complete,
 )
 
@@ -36,6 +39,9 @@ def _isolate_caches(tmp_path, monkeypatch):
     monkeypatch.delenv("HF_HUB_CACHE", raising=False)
     monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
     monkeypatch.setenv("MODELSCOPE_CACHE", str(tmp_path / "modelscope"))
+    # Extra dirs are process-global; a folder left by one test must not leak
+    # into another's candidate list.
+    set_extra_weight_dirs([])
 
 
 def _complete_snapshot(root):
@@ -348,3 +354,114 @@ def test_huggingface_hub_cache_env_drives_lookup(tmp_path, monkeypatch):
 
     assert hub_snapshot_state("image21-int8", "huggingface")["path"] == snap
     assert resolve_local_hub("image21-int8", "huggingface") == "huggingface"
+
+
+def test_extra_dir_pointed_at_snapshot_is_found(tmp_path, monkeypatch):
+    """A user folder that *is* the snapshot root counts as a usable copy."""
+    _isolate_caches(tmp_path, monkeypatch)
+    extra = tmp_path / "my-weights" / "Image21-INT8"
+    _complete_snapshot(extra)
+    set_extra_weight_dirs([extra])
+
+    state = hub_snapshot_state("image21-int8", "huggingface")
+    assert state["complete"] is True
+    assert state["external"] is True
+    assert model_local_path("image21-int8", "huggingface") == extra
+    # Generation resolves through the same layer, so it sees the folder too.
+    assert resolve_local_hub("image21-int8", "huggingface") == "huggingface"
+
+
+def test_extra_dir_in_hf_cache_layout_is_found(tmp_path, monkeypatch):
+    """A folder that looks like a carried-over HF cache is probed too."""
+    _isolate_caches(tmp_path, monkeypatch)
+    extra = tmp_path / "carried-over"
+    repo = repo_id("image21-int8", "huggingface")
+    snap = _complete_snapshot(
+        extra / ("models--" + repo.replace("/", "--")) / "snapshots" / "rev1"
+    )
+    set_extra_weight_dirs([extra])
+
+    assert model_local_path("image21-int8", "huggingface") == snap
+
+
+def test_extra_dir_in_modelscope_layout_is_found(tmp_path, monkeypatch):
+    """A folder written by a ModelScope client also holds a usable copy."""
+    _isolate_caches(tmp_path, monkeypatch)
+    extra = tmp_path / "carried-over"
+    repo = repo_id("image21-int8", "modelscope")
+    snap = _complete_snapshot(
+        extra / "models" / repo.replace("/", "--") / "snapshots" / "master"
+    )
+    set_extra_weight_dirs([extra])
+
+    assert model_local_path("image21-int8", "modelscope") == snap
+
+
+def test_model_status_marks_extra_dir_copy_external(tmp_path, monkeypatch):
+    _isolate_caches(tmp_path, monkeypatch)
+    extra = tmp_path / "elsewhere" / "Qwen-Image-2.1"
+    _complete_snapshot(extra)
+    set_extra_weight_dirs([extra])
+
+    rows = {row["key"]: row for row in model_status("huggingface")}
+    assert rows["qwen-image-2.1"]["downloaded_any"] is True
+    assert rows["qwen-image-2.1"]["external"] is True
+    # Models without a copy anywhere stay absent.
+    assert rows["image21-int8"]["downloaded_any"] is False
+    assert rows["image21-int8"]["external"] is False
+
+
+def test_extra_dirs_never_shadow_the_cache_copy(tmp_path, monkeypatch):
+    """The hub cache stays authoritative: an extra folder cannot downgrade it."""
+    _isolate_caches(tmp_path, monkeypatch)
+    cached = _hf_snapshot(tmp_path, "image21-int8")
+    _complete_snapshot(cached)
+    extra = tmp_path / "stale" / "Image21-INT8"
+    _complete_snapshot(extra)
+    set_extra_weight_dirs([extra])
+
+    state = hub_snapshot_state("image21-int8", "huggingface")
+    assert state["complete"] is True
+    assert state["path"] == cached
+    assert state["external"] is False
+
+
+def test_describe_weight_dir_reports_models_and_reasons(tmp_path, monkeypatch):
+    _isolate_caches(tmp_path, monkeypatch)
+    extra = tmp_path / "hand" / "Image21-INT4"
+    _complete_snapshot(extra)
+
+    found = describe_weight_dir(extra.parent)
+    assert found["ok"] is True
+    assert found["models"] == ["Image21-INT4"]
+
+    assert describe_weight_dir(str(tmp_path / "nope"))["reason"] == "missing"
+    a_file = tmp_path / "afile"
+    a_file.write_text("x", encoding="utf-8")
+    assert describe_weight_dir(a_file)["reason"] == "not_a_dir"
+    assert describe_weight_dir("   ")["reason"] == "empty"
+
+
+def test_describe_weight_dir_probes_both_hub_repo_ids(tmp_path, monkeypatch):
+    """`ixim/...` (HF) and `iximbox/...` (ModelScope) both count."""
+    _isolate_caches(tmp_path, monkeypatch)
+    hf_repo = repo_id("image21-int8", "huggingface")
+    ms_repo = repo_id("image21-int8", "modelscope")
+    assert hf_repo != ms_repo
+
+    ms_style = tmp_path / "ms-dump"
+    _complete_snapshot(ms_style / "models" / ms_repo.replace("/", "--") / "snapshots" / "master")
+    assert describe_weight_dir(ms_style)["models"] == ["Image21-INT8"]
+
+    hf_style = tmp_path / "hf-dump"
+    _complete_snapshot(hf_style / ("models--" + hf_repo.replace("/", "--")) / "snapshots" / "r")
+    assert describe_weight_dir(hf_style)["models"] == ["Image21-INT8"]
+
+
+def test_set_extra_weight_dirs_dedupes_and_skips_blanks(tmp_path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    stored = set_extra_weight_dirs([str(a), str(b), str(a), "  ", None])
+    assert stored == [a, b]
+    assert extra_weight_dirs() == [a, b]
+    set_extra_weight_dirs(None)
+    assert extra_weight_dirs() == []

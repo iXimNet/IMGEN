@@ -195,26 +195,20 @@ def _modelscope_repo_dirs(root: Path, repo: str) -> list[Path]:
     owner, _, name = repo.partition("/")
     safe_name = name.replace(".", "___")
     flat_id = repo.replace("/", "--")
-    ordered = [
-        root / "models" / flat_id,
-        root / "models" / owner / safe_name,
-        root / "hub" / "models" / owner / safe_name,
-        root / "hub" / "models" / owner / name,
-        root / "models" / owner / name,
-        root / "hub" / owner / safe_name,
-        root / "hub" / owner / name,
-        root / owner / safe_name,
-        root / owner / name,
-    ]
     # `safe_name` equals `name` for repos without dots, so drop the repeats.
-    seen: set[str] = set()
-    unique: list[Path] = []
-    for path in ordered:
-        key = str(path)
-        if key not in seen:
-            seen.add(key)
-            unique.append(path)
-    return unique
+    return _unique_paths(
+        [
+            root / "models" / flat_id,
+            root / "models" / owner / safe_name,
+            root / "hub" / "models" / owner / safe_name,
+            root / "hub" / "models" / owner / name,
+            root / "models" / owner / name,
+            root / "hub" / owner / safe_name,
+            root / "hub" / owner / name,
+            root / owner / safe_name,
+            root / owner / name,
+        ]
+    )
 
 
 def _snapshot_children(repo_dir: Path) -> list[Path]:
@@ -235,34 +229,159 @@ def _snapshot_children(repo_dir: Path) -> list[Path]:
     return [repo_dir]
 
 
+def _unique_paths(paths: list[Path]) -> list[Path]:
+    """Drop repeats while keeping the given order."""
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for path in paths:
+        key = str(path)
+        if key not in seen:
+            seen.add(key)
+            unique.append(path)
+    return unique
+
+
+# ---------------------------------------------------------------------------
+# Extra weight directories
+#
+# Users often already have the weights somewhere else — downloaded by hand, by
+# another tool, or on a different drive. Those folders are only ever *searched*,
+# never written to: a download always lands in the hub's own cache, so the two
+# concerns stay separable. The list lives in config and is pushed in here at
+# startup and on every change, which keeps the lookup helpers free of a config
+# dependency and lets `engine.py` benefit without threading a parameter through
+# every call site.
+# ---------------------------------------------------------------------------
+_EXTRA_ROOTS: list[Path] = []
+_EXTRA_LOCK = threading.Lock()
+
+
+def set_extra_weight_dirs(paths: list[str | Path] | None) -> list[Path]:
+    """Replace the extra weight directories. Returns what was stored."""
+    global _EXTRA_ROOTS
+    cleaned: list[Path] = []
+    for item in paths or []:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        try:
+            cleaned.append(Path(text).expanduser())
+        except (OSError, ValueError):
+            continue
+    cleaned = _unique_paths(cleaned)
+    with _EXTRA_LOCK:
+        _EXTRA_ROOTS = cleaned
+    return cleaned
+
+
+def extra_weight_dirs() -> list[Path]:
+    """The extra weight directories currently in effect."""
+    with _EXTRA_LOCK:
+        return list(_EXTRA_ROOTS)
+
+
+def _is_extra_path(path: Path) -> bool:
+    """Whether a snapshot came from a user-added directory rather than a cache."""
+    for root in extra_weight_dirs():
+        try:
+            path.relative_to(root)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _candidates_under(root: Path, repo: str, hub: str) -> list[Path]:
+    """Directories holding ``repo`` under one root, following that hub's layout."""
+    if hub == "huggingface":
+        hub_dir = root / ("models--" + repo.replace("/", "--"))
+        out: list[Path] = []
+        snapshots = hub_dir / "snapshots"
+        if snapshots.is_dir():
+            out.extend(
+                sorted(
+                    (item for item in snapshots.iterdir() if item.is_dir()),
+                    key=lambda item: item.name,
+                    reverse=True,
+                )
+            )
+        out.append(hub_dir)
+        return out
+    out = []
+    for repo_dir in _modelscope_repo_dirs(root, repo):
+        out.extend(_snapshot_children(repo_dir))
+    return out
+
+
+def _extra_candidates(root: Path, repo: str) -> list[Path]:
+    """Directories to probe under a user-added root, most specific first.
+
+    A user's folder may be a finished snapshot, a hub cache, or anything in
+    between, and it may have been written by either hub's client. So both
+    layouts are probed under the folder's own repo-shaped paths. Every
+    candidate is anchored to the repo by *name* — the plain path, the flat
+    `owner--name` id, or the hub cache layouts — because a snapshot's content
+    cannot tell the models apart (they share the same file names). The folder
+    itself is only probed when its own name identifies the repo: descending
+    from an arbitrary folder would claim whatever model happens to sit inside,
+    so `E:/stuff/Image21-INT4` must not answer a lookup for Qwen-Image-2.1.
+    """
+    out: list[Path] = []
+    for hub in HUBS:
+        out.extend(_candidates_under(root, repo, hub))
+    out.append(root / repo.replace("/", os.sep))
+    out.append(root / repo.replace("/", "--"))
+    out.append(root / repo.split("/")[-1])
+    names = {repo.split("/")[-1].lower(), repo.replace("/", "--").lower()}
+    if root.name.lower() in names:
+        out.append(root)
+    return _unique_paths(out)
+
+
 def _snapshot_candidates(model_key: str, hub: str, cache_root: Path | None = None) -> list[Path]:
     repo = repo_id(model_key, hub)
     candidates: list[Path] = []
     if hub == "huggingface":
-        dir_name = "models--" + repo.replace("/", "--")
         for root in _hub_cache_roots("huggingface"):
-            hub_dir = root / dir_name
-            snapshots = hub_dir / "snapshots"
-            if snapshots.exists():
-                for snap in sorted(snapshots.iterdir(), reverse=True):
-                    candidates.append(snap)
-            candidates.append(hub_dir)
+            candidates.extend(_candidates_under(root, repo, "huggingface"))
     else:
         # ModelScope moved snapshots under `hub/models/` and then again under
         # `models/<owner>--<name>/snapshots/`; every layout is still reachable.
         for root in _hub_cache_roots("modelscope"):
-            for repo_dir in _modelscope_repo_dirs(root, repo):
-                candidates.extend(_snapshot_children(repo_dir))
+            candidates.extend(_candidates_under(root, repo, "modelscope"))
+    # The hub's own cache stays first — it is where downloads land, so it is
+    # the authoritative copy. User-added directories are the fallback.
+    for root in extra_weight_dirs():
+        candidates.extend(_extra_candidates(root, repo))
     if cache_root:
         candidates.insert(0, cache_root / hub / repo.replace("/", os.sep))
-    return candidates
+    return _unique_paths(candidates)
+
+
+def _resolved_belongs(resolved: Path, candidate: Path) -> bool:
+    """Whether a resolved snapshot was reached without guessing who owns it.
+
+    ``resolve_snapshot_dir`` may descend one level, and that is only
+    trustworthy when the layer it crossed is the repo's own
+    (``snapshots/<revision>``). Descending from a user folder straight into
+    whatever model happens to sit inside it would report the *wrong* weights:
+    a folder holding Image21-INT4 must not satisfy a lookup for
+    Qwen-Image-2.1. Multi-model folders still work — each repo is probed by
+    its own plain path (``<folder>/<name>``), never through the blind descent.
+    """
+    if resolved == candidate:
+        return True
+    return resolved.parent.parent == candidate and resolved.parent.name == "snapshots"
 
 
 def find_snapshot_dir(model_key: str, hub: str, cache_root: Path | None = None) -> Path | None:
     """Return a snapshot that has model_index.json, even if weight shards are missing."""
     for candidate in _snapshot_candidates(model_key, hub, cache_root):
         resolved = resolve_snapshot_dir(candidate)
-        if (resolved / "model_index.json").exists():
+        if (
+            (resolved / "model_index.json").exists()
+            and _resolved_belongs(resolved, candidate)
+        ):
             return resolved
     return None
 
@@ -279,12 +398,17 @@ def hub_snapshot_state(model_key: str, hub: str, cache_root: Path | None = None)
     """What one hub's cache holds for a model: nothing, a partial snapshot, or weights."""
     complete = model_local_path(model_key, hub, cache_root)
     found = complete or find_snapshot_dir(model_key, hub, cache_root)
+    path = complete or found
     return {
         "hub": hub,
         "complete": bool(complete),
         "incomplete": bool(found) and not complete,
-        "path": complete or found,
+        "path": path,
         "missing": missing_weight_files(found) if found and not complete else [],
+        # Weights can come from the hub cache or from a folder the user added.
+        # The studio labels which, so a snapshot in an unexpected place is
+        # never mistaken for a download that landed where it should have.
+        "external": bool(path) and _is_extra_path(path),
     }
 
 
@@ -521,6 +645,55 @@ def _download_modelscope(
     return Path(path)
 
 
+def describe_weight_dir(raw: str | Path) -> dict:
+    """Classify a user-supplied folder before it is saved as a search path.
+
+    Saving an unreadable path silently would make the studio claim a folder is
+    being searched when it is not, so the check happens up front and the
+    problem is reported to whoever added it. The answer carries the resolved
+    absolute path so what gets stored is what was checked.
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return {"path": text, "ok": False, "reason": "empty", "models": []}
+    try:
+        path = Path(text).expanduser().resolve()
+    except (OSError, ValueError):
+        return {"path": text, "ok": False, "reason": "invalid", "models": []}
+
+    if not path.exists():
+        return {"path": str(path), "ok": False, "reason": "missing", "models": []}
+    if not path.is_dir():
+        return {"path": str(path), "ok": False, "reason": "not_a_dir", "models": []}
+
+    return {
+        "path": str(path),
+        "ok": True,
+        "reason": "ok",
+        "models": [spec["label"] for spec in MODELS.values() if _dir_holds_model(path, spec["key"])],
+    }
+
+
+def _dir_holds_model(root: Path, model_key: str) -> bool:
+    """Whether a folder contains a usable copy of one model.
+
+    The repo id differs per source (`ixim/...` on Hugging Face,
+    `iximbox/...` on ModelScope), so both are probed: a folder written by
+    either client counts. The same identity guard as `find_snapshot_dir`
+    applies — a sibling model's snapshot never satisfies another lookup.
+    """
+    for hub in HUBS:
+        for candidate in _extra_candidates(root, repo_id(model_key, hub)):
+            resolved = resolve_snapshot_dir(candidate)
+            if (
+                (resolved / "model_index.json").exists()
+                and snapshot_is_complete(resolved)
+                and _resolved_belongs(resolved, candidate)
+            ):
+                return True
+    return False
+
+
 def model_status(hub: str) -> list[dict]:
     """Per-model presence report, told apart by which hub holds the weights.
 
@@ -547,6 +720,9 @@ def model_status(hub: str) -> list[dict]:
             (states[name]["missing"] for name in incomplete_hubs), []
         )
         size = _dir_size(preferred) if preferred else 0
+        # A usable snapshot that sits outside any hub cache came from a folder
+        # the user added; the studio says so instead of claiming a download.
+        external = bool(preferred) and _is_extra_path(preferred)
 
         rows.append(
             {
@@ -559,6 +735,7 @@ def model_status(hub: str) -> list[dict]:
                 "downloaded_any": bool(complete_hubs),
                 "available_hubs": complete_hubs,
                 "local_hub": local_hub,
+                "external": external,
                 "incomplete": bool(selected["incomplete"]),
                 "incomplete_any": bool(incomplete_hubs),
                 "incomplete_hubs": incomplete_hubs,

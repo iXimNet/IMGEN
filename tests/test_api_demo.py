@@ -259,13 +259,6 @@ def test_jobs_never_expose_local_paths(client):
     assert client.get(f"/api/jobs/{job_id}").json()["image_url"] == f"/api/outputs/{job_id}"
 
 
-def test_bootstrap_reports_engine_health(client):
-    """The pill dot reports health; residency is a separate field."""
-    engine = client.get("/api/bootstrap").json()["engine"]
-    assert "last_error" in engine, "health needs its own field, not loaded/not-loaded"
-    assert engine["last_error"] is None, "a fresh demo engine has not failed"
-
-
 def test_demo_engine_loads_without_error(client):
     """A successful run must not leave a stale failure behind."""
     response = client.post(
@@ -417,23 +410,6 @@ def test_topbar_links_to_the_repository(client):
     assert 'symbol id="i-github"' in html
 
 
-def test_topbar_links_to_the_repository(client):
-    """The GitHub entry must be a real anchor, not a scripted button.
-
-    An anchor is what gives users middle-click / open-in-new-tab for free, and
-    `rel="noopener"` is what stops the new tab from reaching back into this one.
-    """
-    html = client.get("/").text
-
-    assert 'id="githubLink"' in html
-    assert 'href="https://github.com/iXimNet/IMGEN"' in html
-    anchor = html[html.index('id="githubLink"') - 200: html.index('id="githubLink"') + 200]
-    assert 'target="_blank"' in anchor
-    assert "noopener" in anchor
-    # The icon lives in the sprite like every other top-bar glyph.
-    assert 'symbol id="i-github"' in html
-
-
 def test_brand_mark_and_favicon_share_one_symbol(client):
     """The header mark and the favicon must stay the same artwork.
 
@@ -455,22 +431,49 @@ def test_brand_mark_and_favicon_share_one_symbol(client):
     assert "brand-mark::after" not in client.get("/css/app.css").text
 
 
-def test_brand_mark_and_favicon_share_one_symbol(client):
-    """The header mark and the favicon must stay the same artwork.
+def test_weight_dirs_normalisation(tmp_path):
+    from imgen.config import ConfigStore, normalize_weight_dirs
+    from imgen.paths import AppPaths
 
-    They are drawn twice on purpose — the favicon is a standalone file the
-    browser fetches, and the header needs it inline to inherit nothing — so the
-    shared 48-unit grid and the safelight accent are the contract between them.
-    """
-    html = client.get("/").text
-    favicon = client.get("/favicon.svg").text
+    assert normalize_weight_dirs(None) == []
+    assert normalize_weight_dirs("D:/weights") == ["D:/weights"]
+    assert normalize_weight_dirs(["a", "a", "  ", "b", 5]) == ["a", "b", "5"]
 
-    assert 'symbol id="i-brand"' in html
-    assert 'class="brand-mark"' in html and "<use href=\"#i-brand\"/>" in html
-    # Both use the same coordinate system and the same single accent colour.
-    assert 'viewBox="0 0 48 48"' in favicon
-    for colour in ("#f0a043", "#3a4048", "#111316"):
-        assert colour in html, f"{colour} missing from the header mark"
-        assert colour in favicon, f"{colour} missing from the favicon"
-    # The old mark was two CSS pseudo-elements; make sure it is really gone.
-    assert "brand-mark::after" not in client.get("/css/app.css").text
+    store = ConfigStore(AppPaths(tmp_path))
+    store.save({"extra_weight_dirs": ["a", "a"]})
+    assert store.load()["extra_weight_dirs"] == ["a"]
+    # A hand-edited config file cannot wedge the store into a non-list.
+    store.paths.config_file.write_text(
+        '{"extra_weight_dirs": "just-a-string"}', encoding="utf-8"
+    )
+    assert store.load()["extra_weight_dirs"] == ["just-a-string"]
+
+
+def test_extra_weight_dirs_roundtrip(client, tmp_path):
+    """check-dir guards the gate; PUT /api/config persists and echoes the list."""
+    folder = tmp_path / "my-weights"
+    folder.mkdir()
+
+    bad = client.post("/api/weights/check-dir", json={"path": str(tmp_path / "nope")}).json()
+    assert bad["ok"] is False
+    assert bad["reason"] == "missing"
+
+    good = client.post("/api/weights/check-dir", json={"path": str(folder)}).json()
+    assert good["ok"] is True
+    assert good["path"] == str(folder)
+    assert good["models"] == []
+
+    saved = client.put(
+        "/api/config", json={"extra_weight_dirs": [str(folder), str(folder)]}
+    ).json()
+    assert saved["extra_weight_dirs"] == [str(folder)]
+
+    extras = client.get("/api/bootstrap").json()["storage"]["extra_dirs"]
+    assert [item["path"] for item in extras] == [str(folder)]
+    assert extras[0]["ok"] is True
+
+    # Removing goes through the same endpoint and clears the search layer.
+    saved = client.put("/api/config", json={"extra_weight_dirs": []}).json()
+    assert saved["extra_weight_dirs"] == []
+    assert client.get("/api/bootstrap").json()["storage"]["extra_dirs"] == []
+

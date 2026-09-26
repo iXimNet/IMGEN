@@ -159,6 +159,20 @@
   badge saying which setting decided the path, and it follows the download source
   as you switch. The output directory is read from the app paths instead of the
   hard-coded `~/.imgen/models`, which never existed.
+- **Extra weight folders.** The first-run sheet shows where downloads land (the
+  compact weights line, following the selected source), and both the first-run
+  and settings sheets let you add folders that already hold weights — a
+  hand-download, another tool's cache, another drive. Folders are only ever
+  searched, never written to: a download still lands in the hub's own cache.
+  Adding goes through `POST /api/weights/check-dir`, which classifies the path
+  (missing / not a folder / which models it holds) before anything is stored,
+  and `POST /api/weights/pick-dir` opens the OS folder picker where one is
+  available. Every candidate is anchored to a repo by name — the plain
+  `owner/name`, the flat `owner--name` id, or a hub cache layout — so a folder
+  holding Image21-INT4 never satisfies a lookup for another model, and the hub
+  cache always outranks an extra folder when both hold a copy. A model whose
+  weights come from an added folder reads "ready · from another folder" on its
+  row and generates from there directly.
 
 ### Corrected defaults — Image21-INT8 errata (2026-09-24)
 - **VAE tiling now defaults to off and nothing turns it on implicitly.** The card
