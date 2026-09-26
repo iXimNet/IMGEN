@@ -404,16 +404,26 @@ class Engine:
             self._busy = False
 
     def _cpu_decode(self) -> bool:
-        """True when the resident pipeline decodes its VAE on the CPU.
+        """True when decoding this pipeline's VAE will be slow on the CPU.
 
-        INT4 group offload (small CUDA cards, <=10 GB) keeps the VAE on the CPU
-        to protect VRAM, so a 1024px decode there can take minutes. INT8 and
-        BF16 model-offload move the whole VAE onto the GPU when its turn comes,
-        which is fast; only the INT4 small-card recipe pays the slow path.
+        INT4 group offload is the interesting case: the runtime used to pin the
+        VAE to the CPU entirely, which made a 1024px decode take tens of
+        minutes. It now reports where decode actually runs (``vae_decode``), so
+        the studio's warning follows the real path instead of the recipe.
+        INT8 and BF16 model-offload move the whole VAE onto the GPU when its
+        turn comes; their decode is fast.
         """
         loaded = self._loaded or {}
         if loaded.get("loader") == "int4":
-            runtime = loaded.get("runtime") or {}
+            runtime = dict(loaded.get("runtime") or {})
+            live = getattr(self._pipe, "image21_runtime", None)
+            if live:
+                # A decode that OOMed on the GPU and latched back to the CPU
+                # should say so, even though the engine was told otherwise.
+                runtime.update(live)
+            where = str(runtime.get("vae_decode") or "").lower()
+            if where:
+                return where == "cpu"
             return runtime.get("offload") == "group"
         return False
 
@@ -475,8 +485,10 @@ class Engine:
         # The sampler reports per step, but the VAE decode afterwards used to
         # be a silent stretch: the studio froze on "100%, ~0s left" while a
         # small-GPU INT4 run decoded on the CPU for minutes. Wrap the VAE's
-        # decode so the phase is announced the moment it is actually entered.
+        # decode so the phase is announced the moment it is actually entered,
+        # and print start/finish so the console shows where a run's time went.
         slow_decode = self._cpu_decode()
+        decode_where = "CPU" if slow_decode else str(self.device_info.get("device") or "device")
         vae = getattr(pipe, "vae", None)
         original_decode = getattr(vae, "decode", None) if vae is not None else None
         # INT4 group offload stores an instance-level CPU-decode wrapper on the
@@ -484,11 +496,14 @@ class Engine:
         # restore below re-attaches the exact callable that was there before.
         instance_level = vae is not None and "decode" in vars(vae)
         announced = False
+        decode_started = 0.0
 
         def decode_with_phase(latents, *args, **kw):
-            nonlocal announced
+            nonlocal announced, decode_started
             if not announced:
                 announced = True
+                decode_started = time.time()
+                print(f"[imgen] VAE decode started on {decode_where}", flush=True)
                 callback({"type": "generate_phase", "phase": "decode", "slow": slow_decode})
             return original_decode(latents, *args, **kw)
 
@@ -496,6 +511,13 @@ class Engine:
             vae.decode = decode_with_phase
         try:
             result = pipe(**kwargs)
+        except BaseException:
+            if announced:
+                print(
+                    f"[imgen] VAE decode failed after {time.time() - decode_started:.1f}s",
+                    flush=True,
+                )
+            raise
         finally:
             if vae is not None and original_decode is not None:
                 if instance_level:
@@ -504,6 +526,8 @@ class Engine:
                     # Drop the shadowing instance attribute; the class method
                     # shows through again.
                     vars(vae).pop("decode", None)
+        if announced:
+            print(f"[imgen] VAE decode finished in {time.time() - decode_started:.1f}s", flush=True)
 
         images_out = list(result.images)
         return images_out

@@ -203,6 +203,23 @@
   scrollbar itself stays hidden.
 
 ### Fixes
+- **Decoding no longer runs on the CPU while the GPU sits idle.** INT4's
+  small-card recipe pinned the VAE to the CPU for both directions, so a 1024px
+  run finished its sampler in 30 s and then sat in "decoding" for tens of
+  minutes — the picture never arrived. Encode still stays on the CPU (it runs
+  *before* sampling, while the transformer owns the GPU) but decode now borrows
+  the accelerator, because sampling is over by then and the VRAM is free. A
+  decode that still runs out of VRAM latches back to the CPU for the rest of
+  the process, so a run always finishes; the settled device is reported in the
+  job's runtime info, and the console prints the decode's start, finish and
+  elapsed time — including the VRAM fallback.
+- **The studio re-reads a job's real state instead of trusting the socket.**
+  Losing a `job_complete` frame (reconnect, restarted server, a sleeping
+  laptop) used to leave the progress bar sweeping forever with a finished
+  picture nowhere on screen. The studio now polls the job while it runs,
+  re-syncs on every reconnect, and re-attaches to a running job after a reload
+  or in a second tab — the row, not the event stream, decides when a job is
+  done.
 - **The VAE decode no longer looks like a hang.** On small-GPU INT4 runs the
   VAE decodes on the CPU (group offload pins it there to protect VRAM), which
   takes minutes at 1024px — and nothing said so: the sampler's last step froze

@@ -49,6 +49,7 @@ def stack(monkeypatch):
         cuda=SimpleNamespace(
             is_available=lambda: True,
             get_device_properties=lambda device: SimpleNamespace(total_memory=8 * 1024**3),
+            empty_cache=Mock(),
         ),
         backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda: True)),
     )
@@ -91,7 +92,10 @@ def test_runtime_placement(device, memory, mode):
     assert runtime.choose_runtime(device, memory * 1024**3)["offload"] == mode
 
 
-def test_small_cuda_offloads_both_vae_directions(stack):
+def test_small_cuda_decodes_on_the_gpu_and_encodes_on_the_cpu(stack):
+    """The VAE splits by direction: encode is pinned to the CPU because it runs
+    while the transformer owns the GPU; decode borrows the GPU because by then
+    the sampler is done. A CPU decode was what made 1024px runs crawl."""
     pipe = runtime.load_int4_pipeline("/snapshot", device="cuda:1", local_files_only=True)
     stack.loader.assert_called_once_with("/snapshot", dtype="bfloat16", local_files_only=True)
     block = pipe.transformer.enable_group_offload.call_args.kwargs
@@ -100,13 +104,17 @@ def test_small_cuda_offloads_both_vae_directions(stack):
     assert block["use_stream"] is False and block["non_blocking"] is False
     assert stack.group.call_args.args == (pipe.text_encoder,)
     assert stack.group.call_args.kwargs["offload_type"] == "leaf_level"
-    pipe.vae.to.assert_called_once_with("cpu")
+    # The resident copy starts and ends on the CPU — the GPU is only borrowed.
+    assert pipe.vae.to.call_args_list[0].args == ("cpu",)
     decoded = pipe.vae.decode(Tensor("cuda:1"), return_dict=False)
-    assert decoded.device == "cpu"
+    assert decoded.device == "cuda:1"
+    assert pipe.vae.to.call_args_list[-1].args == ("cpu",)
+    assert stack.torch.cuda.empty_cache.called
     encoded = pipe._encode_vae_image(Tensor("cuda:1", "float16"), "cpu-generator")
     assert encoded.device == "cuda:1" and encoded.dtype == "float16"
     # The closure captured the original encode function; inspect its call via a separate test below.
     assert pipe.image21_runtime["offload"] == "group"
+    assert pipe.image21_runtime["vae_decode"] == "cuda"
     pipe.to.assert_not_called()
     pipe.enable_model_cpu_offload.assert_not_called()
 
@@ -134,7 +142,8 @@ def test_resident_devices_and_dtype_override(stack, monkeypatch, device):
     assert str(pipe.to.call_args.args[0]) == device
     assert stack.loader.call_args.kwargs["dtype"] == "float16"
     assert pipe.image21_runtime == {
-        "offload": "resident", "dtype": "float16", "device": device, "use_stream": False,
+        "offload": "resident", "dtype": "float16", "device": device,
+        "use_stream": False, "vae_decode": device,
     }
     pipe.enable_model_cpu_offload.assert_not_called()
 

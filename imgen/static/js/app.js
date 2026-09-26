@@ -29,6 +29,7 @@
     decoding: false,
     decodeAt: 0,
     decodeTimer: 0,
+    pollTimer: 0,
     currentImage: null,
     hasResult: false,
     busy: false,
@@ -1694,8 +1695,11 @@
     renderTools();
     // Every exit path (complete, cancel, error) funnels through here; the
     // decode state must never outlive the job that started it.
-    if (!busy) stopDecodeUi();
-    if (!busy) setTimeout(() => $("progress").classList.add("hidden"), 800);
+    if (!busy) {
+      stopDecodeUi();
+      stopJobPoll();
+      setTimeout(() => $("progress").classList.add("hidden"), 800);
+    }
   }
 
   function startDecodeUi(slow) {
@@ -1723,6 +1727,90 @@
     S.decoding = false;
     const track = $("progressTrack");
     if (track) track.classList.remove("pulse");
+  }
+
+  /* ======================================================================
+     Job lifecycle
+     A job outlives the socket that announces it: tabs reconnect, the server
+     restarts, the machine sleeps, a long decode outlasts a dropped frame.
+     So the terminal states are reached from two directions — the socket event
+     and the poll/reconnect fallback — and both land on the same functions.
+     ====================================================================== */
+  async function applyJobComplete(jobId, imageUrl) {
+    // Only the job this tab is tracking may finish it; a late duplicate (poll
+    // and event racing) or a stale event from an older run is ignored.
+    if (S.jobId !== jobId) return;
+    const started = S.startedAt;
+    setBusy(false);
+    S.jobId = null;
+    $("progressBar").style.width = "100%";
+    let item = null;
+    try { item = await api(`/api/jobs/${jobId}`); } catch (_) { /* fall back to local state */ }
+    const w = (item && item.width) || S.width;
+    const h = (item && item.height) || S.height;
+    showResult(`${imageUrl || `/api/outputs/${jobId}`}?t=${Date.now()}`, w, h);
+    const seconds = item && item.duration_ms ? (item.duration_ms / 1000).toFixed(1) : ((Date.now() - started) / 1000).toFixed(1);
+    toast("ok", tr("toastDone"), tfx("toastDoneDetail", { w, h, s: seconds }));
+    await loadHistory().catch(() => {});
+  }
+
+  function failJobUi(message) {
+    setBusy(false);
+    S.jobId = null;
+    S.download = { key: null, pct: 0, bytes: 0, total: null };
+    renderWeightsList();
+    toast("err", tr("errFailed"), message || "");
+    refreshBootstrap().then(renderEnv).catch(() => {});
+  }
+
+  function cancelJobUi() {
+    setBusy(false);
+    S.jobId = null;
+    $("progress").classList.add("hidden");
+    toast("ok", tr("toastCancelled"), tr("toastCancelledDetail"));
+  }
+
+  /* Ask the server what happened to the job this tab is tracking. Never infer
+     "still running" from a missing event — that is how a finished picture used
+     to stay invisible behind a bar that swept forever. */
+  async function resyncJob() {
+    const jobId = S.jobId;
+    if (!jobId) return;
+    let item = null;
+    try { item = await api(`/api/jobs/${jobId}`); } catch (_) { return; }
+    if (!item || S.jobId !== jobId) return;
+    if (item.status === "succeeded") await applyJobComplete(jobId, item.image_url);
+    else if (item.status === "failed") failJobUi(item.error || "");
+    else if (item.status === "cancelled") cancelJobUi();
+  }
+
+  function startJobPoll() {
+    stopJobPoll();
+    S.pollTimer = setInterval(() => { resyncJob().catch(() => {}); }, 5000);
+  }
+
+  function stopJobPoll() {
+    if (S.pollTimer) {
+      clearInterval(S.pollTimer);
+      S.pollTimer = 0;
+    }
+  }
+
+  /* A reload — or a second tab — has no socket history. If the engine is still
+     working on the newest row, re-attach instead of showing an idle studio. */
+  async function adoptRunningJob() {
+    if (S.busy) return;
+    let data = null;
+    try { data = await api("/api/jobs?limit=5"); } catch (_) { return; }
+    const running = (data.items || []).find((item) => item.status === "running");
+    if (!running) return;
+    S.jobId = running.id;
+    S.startedAt = Date.parse(running.created_at) || Date.now();
+    setBusy(true);
+    $("progress").classList.remove("hidden");
+    $("progressPhase").textContent = tr("phaseSampling");
+    $("progressBar").style.width = "2%";
+    startJobPoll();
   }
 
   function buildForm() {
@@ -1779,6 +1867,9 @@
     try {
       const job = await api("/api/jobs", { method: "POST", body: buildForm() });
       S.jobId = job.id;
+      // Belt and braces beside the socket: the poll notices a finished job
+      // even if every event was lost on the way.
+      startJobPoll();
     } catch (err) {
       setBusy(false);
       $("progress").classList.add("hidden");
@@ -1796,6 +1887,10 @@
       let msg;
       try { msg = JSON.parse(event.data); } catch (_) { return; }
       handleEvent(msg).catch(() => {});
+    };
+    ws.onopen = () => {
+      // A reconnect has missed everything that happened while it was down.
+      resyncJob().catch(() => {});
     };
     ws.onclose = () => setTimeout(connectWs, 1500);
 
@@ -1857,32 +1952,23 @@
         } catch (_) { /* keep the toast */ }
       }
       if (msg.type === "job_complete") {
-        setBusy(false);
-        S.jobId = null;
-        $("progressBar").style.width = "100%";
-        let item = null;
-        try { item = await api(`/api/jobs/${msg.id}`); } catch (_) { /* fall back to local state */ }
-        const w = (item && item.width) || S.width;
-        const h = (item && item.height) || S.height;
-        showResult(`${msg.image}?t=${Date.now()}`, w, h);
-        const seconds = item && item.duration_ms ? (item.duration_ms / 1000).toFixed(1) : ((Date.now() - S.startedAt) / 1000).toFixed(1);
-        toast("ok", tr("toastDone"), tfx("toastDoneDetail", { w, h, s: seconds }));
-        await loadHistory().catch(() => {});
+        await applyJobComplete(msg.id, msg.image);
       }
       if (msg.type === "job_cancelled") {
-        setBusy(false);
-        S.jobId = null;
-        $("progress").classList.add("hidden");
-        toast("ok", tr("toastCancelled"), tr("toastCancelledDetail"));
+        cancelJobUi();
       }
       if (msg.type === "error") {
-        setBusy(false);
-        S.download = { key: null, pct: 0, bytes: 0, total: null };
-        renderWeightsList();
-        toast("err", tr("errFailed"), msg.message || "");
-        // A failed load is what turns the dot red — pick it up right away.
-        if (msg.stage === "generate" || msg.stage === "load") {
-          await refreshBootstrap().then(renderEnv).catch(() => {});
+        if (msg.stage === "generate" && S.jobId) {
+          failJobUi(msg.message || "");
+        } else {
+          setBusy(false);
+          S.download = { key: null, pct: 0, bytes: 0, total: null };
+          renderWeightsList();
+          toast("err", tr("errFailed"), msg.message || "");
+          // A failed load is what turns the dot red — pick it up right away.
+          if (msg.stage === "generate" || msg.stage === "load") {
+            await refreshBootstrap().then(renderEnv).catch(() => {});
+          }
         }
       }
     }
@@ -2324,6 +2410,9 @@
     }
     connectWs();
     if (!cfg().setup_completed) openFirstRun();
+    // A reload or a second tab should pick up a job the engine is still
+    // running rather than sit idle while the picture is being made.
+    await adoptRunningJob().catch(() => {});
   }
 
   init().catch(reportError);
