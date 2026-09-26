@@ -4,10 +4,10 @@ Adapted from ixim/Image21-INT4 scripts/runtime.py and scripts/device.py:
 https://huggingface.co/ixim/Image21-INT4
 
 Keep the saved quantization and eager PyTorch dequantization. Small CUDA GPUs
-use block/leaf offload, keep VAE encode on the CPU, and borrow the GPU for VAE
-decode (it runs after sampling, when the VRAM is idle). MPS and CPU stay
-resident. Imports are lazy so the studio and BF16/INT8 paths do not require
-SDNQ.
+use block/leaf offload and lend the VAE the accelerator for both of its turns
+(encode before sampling, decode after it), falling back to the CPU whenever a
+turn runs out of VRAM. MPS and CPU stay resident. Imports are lazy so the
+studio and BF16/INT8 paths do not require SDNQ.
 """
 
 from __future__ import annotations
@@ -89,65 +89,106 @@ def _vae_decode_device(device):
     return torch.device("cpu")
 
 
+_FALLBACK = object()
+
+
 def attach_split_vae(pipe, spec: dict, device) -> None:
-    """Keep VAE encode on the CPU, run decode on the accelerator.
+    """Lend the accelerator to the VAE for its turns, keep the CPU as fallback.
 
-    Encode happens *before* sampling, while the transformer still owns the
-    GPU, so it stays on the CPU — upstream's 8GB recipe: untiled encode
-    activations would compete with the denoiser's cache.
-
-    Decode happens *after* sampling, when the transformer is offloaded back to
-    the CPU and the GPU is idle. Keeping it on the CPU is what made a 1024px
-    run sit in "decoding" for tens of minutes; moving the VAE over for its turn
-    turns that into seconds. If the decode still runs out of VRAM it falls back
-    to the CPU for the rest of the process, so a run always finishes.
+    Encode runs *before* sampling and decode *after* it. Both directions used to
+    be pinned to the CPU to protect VRAM, which cost minutes per direction at
+    1024px — an edit run stalled ~20 minutes in the encode, a text run the same
+    in the decode. Sampling has not started when references are encoded, and it
+    is over when the result is decoded, so the accelerator is free for both
+    turns. A turn that still runs out of VRAM latches back to the CPU, so a run
+    always finishes.
     """
     import torch
 
-    decode_device = _vae_decode_device(device)
+    target = _vae_decode_device(device)
     pipe.vae.to("cpu")
     decode = pipe.vae.decode
     encode_image = pipe._encode_vae_image
-    # Latched: once a GPU decode has OOMed there is no point retrying it.
-    state = {"device": decode_device.type}
+    # Latched per direction: once a direction has OOMed there is no point
+    # retrying it on every later run.
+    state = {"encode": target.type, "decode": target.type}
+
+    def _report(direction: str, where: str) -> None:
+        """Record where a direction runs, in every place a reader looks."""
+        spec[f"vae_{direction}"] = where
+        runtime = getattr(pipe, "image21_runtime", None)
+        if runtime is not None:
+            runtime[f"vae_{direction}"] = where
+
+    def _borrow(direction: str, work):
+        """Run one VAE turn on the accelerator; ``_FALLBACK`` means use the CPU."""
+        if state[direction] == "cpu":
+            return _FALLBACK
+        try:
+            pipe.vae.to(target)
+            return work()
+        except RuntimeError as exc:
+            if "out of memory" not in str(exc).lower():
+                raise
+            # Back to the CPU *before* retrying, or the retry runs on a VAE
+            # whose weights are still sitting in the VRAM that just overflowed.
+            pipe.vae.to("cpu")
+            state[direction] = "cpu"
+            # Report it where it is actually read: image21_runtime is a copy of
+            # spec by the time the studio asks, so both have to hear about it.
+            _report(direction, "cpu")
+            print(
+                f"[imgen] VAE {direction} ran out of VRAM; the CPU takes over from now on",
+                flush=True,
+            )
+            _empty_cache(torch)
+            return _FALLBACK
+        finally:
+            pipe.vae.to("cpu")
+            _empty_cache(torch)
 
     def decode_on_cpu(latents, *args, **kwargs):
         if torch.is_tensor(latents):
             latents = latents.detach().to("cpu")
         return decode(latents, *args, **kwargs)
 
-    def decode_on_accelerator(latents, *args, **kwargs):
-        if state["device"] == "cpu" or not torch.is_tensor(latents):
+    def decode_anywhere(latents, *args, **kwargs):
+        if not torch.is_tensor(latents):
             return decode_on_cpu(latents, *args, **kwargs)
-        try:
-            pipe.vae.to(decode_device)
-            moved = latents.detach().to(decode_device)
-            return decode(moved, *args, **kwargs)
-        except RuntimeError as exc:
-            if "out of memory" not in str(exc).lower():
-                raise
-            # Back to the CPU *before* retrying, or the retry decodes on a VAE
-            # whose weights are still sitting in the VRAM that just overflowed.
-            pipe.vae.to("cpu")
-            state["device"] = "cpu"
-            spec["vae_decode"] = "cpu"
-            print(
-                "[imgen] VAE decode ran out of VRAM; decoding on the CPU from now on",
-                flush=True,
-            )
-            _empty_cache(torch)
-            return decode_on_cpu(latents, *args, **kwargs)
-        finally:
-            pipe.vae.to("cpu")
-            _empty_cache(torch)
+
+        def work():
+            return decode(latents.detach().to(target), *args, **kwargs)
+
+        out = _borrow("decode", work)
+        return decode_on_cpu(latents, *args, **kwargs) if out is _FALLBACK else out
 
     def encode_on_cpu(image, generator):
-        encoded = encode_image(image.detach().to("cpu"), generator)
-        return encoded.to(device=image.device, dtype=image.dtype)
+        moved = image.detach().to("cpu") if torch.is_tensor(image) else image
+        encoded = encode_image(moved, generator)
+        if torch.is_tensor(encoded):
+            return encoded.to(device=image.device, dtype=image.dtype)
+        return encoded
 
-    pipe.vae.decode = decode_on_accelerator
-    pipe._encode_vae_image = encode_on_cpu
-    spec["vae_decode"] = state["device"]
+    def encode_anywhere(image, generator):
+        if not torch.is_tensor(image):
+            return encode_on_cpu(image, generator)
+
+        def work():
+            return encode_image(image.detach().to(target), generator)
+
+        out = _borrow("encode", work)
+        if out is _FALLBACK:
+            return encode_on_cpu(image, generator)
+        if torch.is_tensor(out):
+            # The caller works on the execution device; the borrowed one may not
+            # be where it is headed.
+            return out.to(device=image.device, dtype=image.dtype)
+        return out
+
+    pipe.vae.decode = decode_anywhere
+    pipe._encode_vae_image = encode_anywhere
+    _report("encode", state["encode"])
+    _report("decode", state["decode"])
 
 
 def apply_offload(pipe, spec: dict, device):
@@ -156,11 +197,14 @@ def apply_offload(pipe, spec: dict, device):
     mode = spec["offload"]
     if mode == "resident":
         pipe.to(device)
+        spec["vae_encode"] = torch.device(device).type
         spec["vae_decode"] = torch.device(device).type
     elif mode == "model":
         if device.type != "cuda":
             raise ValueError("Model CPU offload requires CUDA")
         pipe.enable_model_cpu_offload(gpu_id=device.index or 0)
+        # Model offload brings each module over for its turn, the VAE included.
+        spec["vae_encode"] = device.type
         spec["vae_decode"] = device.type
     elif mode == "group":
         if device.type != "cuda":

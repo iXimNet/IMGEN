@@ -76,6 +76,10 @@ class Engine:
         # same question as "is a pipeline resident" — an idle engine that has
         # never loaded anything is perfectly healthy.
         self._last_error: dict[str, Any] | None = None
+        # The stage the job in flight is inside (None when idle). The studio
+        # polls it: a run sitting silently in a minutes-long encode looks
+        # exactly like a wedged one unless the stage is reported.
+        self._phase: dict[str, Any] | None = None
         self.device_info = probe()
 
     @property
@@ -92,8 +96,48 @@ class Engine:
             "busy": self._busy,
             "loaded": self._loaded,
             "last_error": self._last_error,
+            "phase": self.phase_status(),
             "device": self.device_info,
         }
+
+    def phase_status(self) -> dict[str, Any] | None:
+        """Which stage the run is in, and how long it has been there.
+
+        The studio polls this for the job it is tracking. "Still in the VAE
+        encode for 4 minutes" is a fact the reader can act on; a silent bar is
+        not.
+        """
+        phase = self._phase
+        if not phase:
+            return None
+        return {
+            "name": phase["name"],
+            "slow": bool(phase["slow"]),
+            "elapsed_ms": int((time.time() - phase["since"]) * 1000),
+        }
+
+    def _mark_phase(self, name: str, slow: bool) -> None:
+        self._phase = {"name": name, "slow": bool(slow), "since": time.time()}
+
+    def _note_sample(self) -> None:
+        """Mark the sampling stage once, so a reload sees "sampling" rather
+        than the encoding stage it has already left."""
+        if not self._phase or self._phase.get("name") != "sample":
+            self._mark_phase("sample", False)
+
+    def _clear_phase(self) -> None:
+        self._phase = None
+
+    def _check_cancel(self) -> None:
+        """Honour a stop request before the next long stretch begins.
+
+        The sampler checks the flag between steps, but the stretches around it
+        — conditioning, VAE encode, VAE decode — can each run for minutes on a
+        small card. Checking at stage boundaries is what makes "stop" land in
+        seconds instead of after the whole run finishes.
+        """
+        if self._cancel.is_set():
+            raise EngineError("Cancelled.", "CANCELLED")
 
     def cancel(self) -> None:
         self._cancel.set()
@@ -327,6 +371,17 @@ class Engine:
             enable_tiling = resolve_vae_tiling(request.get("vae_tiling"))
 
             if self.demo:
+                # Same event shape as a real run so the studio — and its browser
+                # tests — exercise one code path: the conditioning and VAE-encode
+                # stages land before the first sampler step, the decode after the
+                # last one. The short pauses keep each stage observable instead of
+                # a single-frame flash.
+                self._mark_phase("condition", False)
+                callback({"type": "generate_phase", "phase": "condition", "slow": False})
+                time.sleep(0.3)
+                self._mark_phase("encode", False)
+                callback({"type": "generate_phase", "phase": "encode", "slow": False})
+                time.sleep(0.3)
                 images = [
                     self._demo_image(prompt, width, height, seed + i, mode)
                     for i in range(n_images)
@@ -335,6 +390,7 @@ class Engine:
                     if self._cancel.is_set():
                         raise EngineError("Cancelled.", "CANCELLED")
                     time.sleep(0.08)
+                    self._note_sample()
                     callback(
                         {
                             "type": "generate_progress",
@@ -346,6 +402,7 @@ class Engine:
                 # demo keeps the same event shape so the studio — and its
                 # browser tests — exercise one code path. The short pause makes
                 # the decode state observable instead of a single-frame flash.
+                self._mark_phase("decode", False)
                 callback({"type": "generate_phase", "phase": "decode", "slow": False})
                 time.sleep(0.5)
             else:
@@ -402,30 +459,63 @@ class Engine:
             }
         finally:
             self._busy = False
+            self._clear_phase()
+
+    def _runtime(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """The load record plus the INT4 runtime as it stands right now.
+
+        A decode or encode that ran out of VRAM latches the runtime back to the
+        CPU, so the live copy on the pipeline wins over what the load recorded.
+        """
+        loaded = dict(self._loaded or {})
+        runtime = dict(loaded.get("runtime") or {})
+        live = getattr(self._pipe, "image21_runtime", None)
+        if live:
+            runtime.update(live)
+        return loaded, runtime
+
+    def _vae_where(self, direction: str) -> str:
+        """Where the VAE actually runs for ``encode`` or ``decode`` right now."""
+        loaded, runtime = self._runtime()
+        explicit = runtime.get(f"vae_{direction}")
+        if explicit:
+            return str(explicit)
+        return str(loaded.get("device") or "cpu")
+
+    def _cpu_vae(self, direction: str) -> bool:
+        """Only the small-card INT4 recipe reports where the VAE runs.
+
+        BF16 and INT8 move the whole VAE onto the accelerator when its turn
+        comes; their either-direction work is fast.
+        """
+        loaded, _runtime = self._runtime()
+        if loaded.get("loader") != "int4":
+            return False
+        return self._vae_where(direction) == "cpu"
 
     def _cpu_decode(self) -> bool:
         """True when decoding this pipeline's VAE will be slow on the CPU.
 
-        INT4 group offload is the interesting case: the runtime used to pin the
-        VAE to the CPU entirely, which made a 1024px decode take tens of
-        minutes. It now reports where decode actually runs (``vae_decode``), so
-        the studio's warning follows the real path instead of the recipe.
-        INT8 and BF16 model-offload move the whole VAE onto the GPU when its
-        turn comes; their decode is fast.
+        INT4 group offload used to pin the VAE to the CPU entirely, which made a
+        1024px decode take tens of minutes. It now borrows the accelerator for
+        decode and reports where it landed, so the studio's warning follows the
+        real path instead of the recipe.
         """
-        loaded = self._loaded or {}
-        if loaded.get("loader") == "int4":
-            runtime = dict(loaded.get("runtime") or {})
-            live = getattr(self._pipe, "image21_runtime", None)
-            if live:
-                # A decode that OOMed on the GPU and latched back to the CPU
-                # should say so, even though the engine was told otherwise.
-                runtime.update(live)
-            where = str(runtime.get("vae_decode") or "").lower()
-            if where:
-                return where == "cpu"
-            return runtime.get("offload") == "group"
-        return False
+        return self._cpu_vae("decode")
+
+    def _cpu_encode(self) -> bool:
+        """Same question for the encode direction (edit runs encode references)."""
+        return self._cpu_vae("encode")
+
+    def _group_offload(self) -> bool:
+        """True when the pipeline streams weights leaf/block by leaf/block.
+
+        That is the small-card INT4 recipe, and it is what makes the
+        conditioning stretch — a whole vision tower read back through an
+        offloaded encoder — slow enough to be worth announcing.
+        """
+        loaded, runtime = self._runtime()
+        return loaded.get("loader") == "int4" and runtime.get("offload") == "group"
 
     def _run_pipe(
         self,
@@ -456,6 +546,7 @@ class Engine:
                     pipe_ref._interrupt = True
                 except Exception:
                     pass
+            self._note_sample()
             callback({"type": "generate_progress", "step": int(step) + 1, "total": steps})
             return callback_kwargs
 
@@ -482,52 +573,106 @@ class Engine:
         if "callback_on_step_end" in names:
             kwargs["callback_on_step_end"] = on_step_end
 
-        # The sampler reports per step, but the VAE decode afterwards used to
-        # be a silent stretch: the studio froze on "100%, ~0s left" while a
-        # small-GPU INT4 run decoded on the CPU for minutes. Wrap the VAE's
-        # decode so the phase is announced the moment it is actually entered,
-        # and print start/finish so the console shows where a run's time went.
-        slow_decode = self._cpu_decode()
-        decode_where = "CPU" if slow_decode else str(self.device_info.get("device") or "device")
+        # Three stretches of a run carry no per-step signal: reading the prompt
+        # and the reference images, encoding those references through the VAE,
+        # and the VAE decode at the end. Each can take minutes on a small card,
+        # and all three used to be silent — the studio sat on a stale label
+        # ("loading model") while the console said nothing, which is
+        # indistinguishable from a hang. Wrap whichever hooks this pipeline
+        # exposes, announce a stage the moment it is really entered, and time it.
         vae = getattr(pipe, "vae", None)
-        original_decode = getattr(vae, "decode", None) if vae is not None else None
-        # INT4 group offload stores an instance-level CPU-decode wrapper on the
-        # VAE (a plain function, not the class method). Remember that so the
-        # restore below re-attaches the exact callable that was there before.
-        instance_level = vae is not None and "decode" in vars(vae)
-        announced = False
-        decode_started = 0.0
+        stages = {
+            "condition": {
+                "owner": pipe,
+                "name": "encode_prompt",
+                "label": "prompt and reference encoding",
+                "where": str(self.device_info.get("device") or "cpu"),
+                "slow": self._group_offload(),
+            },
+            "encode": {
+                "owner": pipe,
+                "name": "_encode_vae_image",
+                "label": "VAE encode",
+                "where": self._vae_where("encode"),
+                "slow": self._cpu_encode(),
+            },
+            "decode": {
+                "owner": vae,
+                "name": "decode",
+                "label": "VAE decode",
+                "where": self._vae_where("decode"),
+                "slow": self._cpu_decode(),
+            },
+        }
 
-        def decode_with_phase(latents, *args, **kw):
-            nonlocal announced, decode_started
-            if not announced:
-                announced = True
-                decode_started = time.time()
-                print(f"[imgen] VAE decode started on {decode_where}", flush=True)
-                callback({"type": "generate_phase", "phase": "decode", "slow": slow_decode})
-            return original_decode(latents, *args, **kw)
+        announced: set[str] = set()
+        calls: dict[str, int] = {}
+        opened: dict[str, float] = {}
+        installed: list[tuple[Any, str, Any, bool]] = []
 
-        if vae is not None and original_decode is not None:
-            vae.decode = decode_with_phase
-        try:
-            result = pipe(**kwargs)
-        except BaseException:
-            if announced:
+        def install(spec: dict[str, Any], kind: str) -> None:
+            owner = spec["owner"]
+            if owner is None:
+                return
+            original = getattr(owner, spec["name"], None)
+            if original is None:
+                # Not every pipeline names its conditioning hook the same way;
+                # skip the stage rather than guess at a proxy for it.
+                return
+            # INT4 group offload stores an instance-level callable (its CPU
+            # wrapper) while a stock pipeline only has the class method. Both
+            # must come back exactly as they were.
+            instance_level = spec["name"] in vars(owner)
+
+            def shim(*args, _spec=spec, _kind=kind, _original=original, **kw):
+                self._check_cancel()
+                calls[_kind] = calls.get(_kind, 0) + 1
+                if _kind not in announced:
+                    announced.add(_kind)
+                    opened[_kind] = time.time()
+                    self._mark_phase(_kind, _spec["slow"])
+                    print(f"[imgen] {_spec['label']} started on {_spec['where']}", flush=True)
+                    callback(
+                        {"type": "generate_phase", "phase": _kind, "slow": _spec["slow"]}
+                    )
+                try:
+                    out = _original(*args, **kw)
+                except BaseException:
+                    print(
+                        f"[imgen] {_spec['label']} failed after "
+                        f"{time.time() - opened[_kind]:.1f}s",
+                        flush=True,
+                    )
+                    raise
+                extra = f" ({calls[_kind]} calls)" if calls[_kind] > 1 else ""
                 print(
-                    f"[imgen] VAE decode failed after {time.time() - decode_started:.1f}s",
+                    f"[imgen] {_spec['label']} finished in "
+                    f"{time.time() - opened[_kind]:.1f}s{extra}",
                     flush=True,
                 )
-            raise
+                return out
+
+            setattr(owner, spec["name"], shim)
+            installed.append((owner, spec["name"], original, instance_level))
+
+        for kind, spec in stages.items():
+            install(spec, kind)
+
+        self._check_cancel()
+        try:
+            result = pipe(**kwargs)
         finally:
-            if vae is not None and original_decode is not None:
+            for owner, name, original, instance_level in installed:
                 if instance_level:
-                    vae.decode = original_decode
+                    setattr(owner, name, original)
                 else:
                     # Drop the shadowing instance attribute; the class method
                     # shows through again.
-                    vars(vae).pop("decode", None)
-        if announced:
-            print(f"[imgen] VAE decode finished in {time.time() - decode_started:.1f}s", flush=True)
+                    vars(owner).pop(name, None)
+
+        # A stop pressed during a stage lands here, instead of being reported as
+        # a finished run of work nobody asked for any more.
+        self._check_cancel()
 
         images_out = list(result.images)
         return images_out

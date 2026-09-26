@@ -64,12 +64,16 @@ def _read_image(data: bytes, filename: str) -> Image.Image:
     return image
 
 
-def _public_job(item: dict[str, Any]) -> dict[str, Any]:
+def _public_job(item: dict[str, Any], engine=None) -> dict[str, Any]:
     """Drop local filesystem paths; expose only URLs the browser can fetch.
 
     The detail view needs the reference-image count, so it is surfaced as
     ``ref_count`` plus ready-made ``ref_urls`` instead of leaking absolute
     paths on disk.
+
+    A running row also carries the engine's live stage. Only one job runs at a
+    time, so the stage belongs to it — and reporting it is what lets the studio
+    tell "still encoding, be patient" apart from "nothing is happening".
     """
     refs = item.pop("ref_paths", None) or []
     has_image = bool(item.get("image_path") or item.get("thumb_path"))
@@ -80,6 +84,8 @@ def _public_job(item: dict[str, Any]) -> dict[str, Any]:
     item["thumb_url"] = f"/api/thumbs/{job_id}" if has_image else None
     item["ref_count"] = len(refs)
     item["ref_urls"] = [f"/api/refs/{job_id}/{index}" for index in range(len(refs))]
+    if item.get("status") == "running" and engine is not None:
+        item["live_phase"] = engine.phase_status()
     return item
 
 
@@ -438,8 +444,23 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
                     }
                 )
             except EngineError as exc:
-                history.update(job_id, status="failed", error=str(exc))
-                emit({"type": "error", "stage": "generate", "job_id": job_id, "message": str(exc), "code": exc.code})
+                if exc.code == "CANCELLED":
+                    # A stop request is not a failure. The stage boundaries now
+                    # honour the flag, so the run really ends here — report the
+                    # state the user asked for instead of a red error toast.
+                    history.update(job_id, status="cancelled", error=str(exc))
+                    emit({"type": "job_cancelled", "id": job_id})
+                else:
+                    history.update(job_id, status="failed", error=str(exc))
+                    emit(
+                        {
+                            "type": "error",
+                            "stage": "generate",
+                            "job_id": job_id,
+                            "message": str(exc),
+                            "code": exc.code,
+                        }
+                    )
             except Exception as exc:
                 history.update(job_id, status="failed", error=str(exc))
                 emit({"type": "error", "stage": "generate", "job_id": job_id, "message": str(exc)})
@@ -456,7 +477,10 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
 
     @app.get("/api/jobs")
     def list_jobs(limit: int = 80, offset: int = 0, q: str = "") -> dict[str, Any]:
-        items = [_public_job(item) for item in history.list(limit=limit, offset=offset, query=q)]
+        items = [
+            _public_job(item, engine)
+            for item in history.list(limit=limit, offset=offset, query=q)
+        ]
         # `total` lets the browser know whether another page exists without
         # guessing from the page size.
         return {"items": items, "total": history.count(query=q), "offset": offset, "limit": limit}
@@ -466,7 +490,7 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
         item = history.get(job_id)
         if not item:
             raise HTTPException(404, "Job not found.")
-        return _public_job(item)
+        return _public_job(item, engine)
 
     @app.delete("/api/jobs/{job_id}")
     def delete_job(job_id: str) -> dict[str, Any]:

@@ -26,9 +26,17 @@
     refs: [],
     jobId: null,
     startedAt: 0,
-    decoding: false,
-    decodeAt: 0,
-    decodeTimer: 0,
+    /* The stage the engine reports it is in. The socket announces it and the
+       poll repeats it, so a reload can re-attach to a run it never saw start. */
+    phaseName: null,
+    phaseSlow: false,
+    phaseAt: 0,
+    phaseTimer: 0,
+    /* Liveness: when the last job event arrived, and whether the server is
+       still answering. A bar that never moves is not progress. */
+    lastEventAt: 0,
+    watchdog: 0,
+    offline: false,
     pollTimer: 0,
     currentImage: null,
     hasResult: false,
@@ -358,6 +366,9 @@
     renderFollowState();
     renderRefs();
     renderRun();
+    // The stage readout is language-sensitive too; a switch mid-render must not
+    // leave "VAE 解码中…" on screen in English mode.
+    renderPhase();
     renderTools();
     renderHistory();
     renderPresets();
@@ -1694,39 +1705,129 @@
     renderRun();
     renderTools();
     // Every exit path (complete, cancel, error) funnels through here; the
-    // decode state must never outlive the job that started it.
-    if (!busy) {
-      stopDecodeUi();
+    // stage state must never outlive the job that started it.
+    if (busy) {
+      S.lastEventAt = Date.now();
+      S.offline = false;
+      startWatchdog();
+    } else {
+      stopPhaseUi();
+      stopWatchdog();
       stopJobPoll();
       setTimeout(() => $("progress").classList.add("hidden"), 800);
     }
   }
 
-  function startDecodeUi(slow) {
-    S.decoding = true;
-    S.decodeAt = Date.now();
-    $("progressPhase").textContent = tr("phaseDecodingRun");
-    $("progressTrack").classList.add("pulse");
-    const render = () => {
-      const seconds = ((Date.now() - S.decodeAt) / 1000).toFixed(0);
-      $("progressText").textContent = [
-        tfx("metaElapsed", { s: seconds }),
-        slow ? tr("decodingSlowNote") : "",
-      ].filter(Boolean).join(" · ");
-    };
-    render();
-    if (S.decodeTimer) clearInterval(S.decodeTimer);
-    S.decodeTimer = setInterval(render, 1000);
+  /* The engine names the stage it actually entered. Conditioning, the VAE
+     encode and the VAE decode carry no per-step signal and can each take
+     minutes, so those get a sweeping bar and a live timer instead of a bar
+     that sits at 2% with a label that means nothing. */
+  const PHASE_LABEL = {
+    condition: "phaseConditionRun",
+    encode: "phaseEncodeRun",
+    decode: "phaseDecodingRun",
+  };
+  const PHASE_SLOW_NOTE = {
+    condition: "conditioningSlowNote",
+    encode: "encodingSlowNote",
+    decode: "decodingSlowNote",
+  };
+
+  function startPhaseUi(phase, slow, elapsedMs) {
+    const track = $("progressTrack");
+    if (!track) return;
+    if (S.phaseName === phase && S.phaseTimer) {
+      // A poll repeats the same stage every 5s: re-anchor the clock from the
+      // server's own elapsed time instead of restarting the timer each round.
+      S.phaseSlow = !!slow;
+      S.phaseAt = Date.now() - (elapsedMs || 0);
+      renderPhase();
+      return;
+    }
+    stopPhaseUi();
+    S.phaseName = phase;
+    S.phaseSlow = !!slow;
+    S.phaseAt = Date.now() - (elapsedMs || 0);
+    $("progress").classList.remove("hidden");
+    $("progressPhase").textContent = tr(PHASE_LABEL[phase] || "phaseSampling");
+    track.classList.add("pulse");
+    S.phaseTimer = setInterval(renderPhase, 1000);
+    renderPhase();
   }
 
-  function stopDecodeUi() {
-    if (S.decodeTimer) {
-      clearInterval(S.decodeTimer);
-      S.decodeTimer = 0;
+  function renderPhase() {
+    if (!S.phaseName) return;
+    $("progressPhase").textContent = tr(PHASE_LABEL[S.phaseName] || "phaseSampling");
+    const seconds = ((Date.now() - S.phaseAt) / 1000).toFixed(0);
+    $("progressText").textContent = [
+      tfx("metaElapsed", { s: seconds }),
+      S.phaseSlow ? tr(PHASE_SLOW_NOTE[S.phaseName] || "decodingSlowNote") : "",
+    ].filter(Boolean).join(" · ");
+  }
+
+  function stopPhaseUi() {
+    if (S.phaseTimer) {
+      clearInterval(S.phaseTimer);
+      S.phaseTimer = 0;
     }
-    S.decoding = false;
+    S.phaseName = null;
+    S.phaseSlow = false;
     const track = $("progressTrack");
     if (track) track.classList.remove("pulse");
+  }
+
+  /* Nothing inside a long encode checks a cancel flag, so a run that stops
+     reporting looks exactly like one that is working. The stall notice is the
+     difference: after a minute of silence it says so, and points at the two
+     things it can be. */
+  const STALL_MS = 60000;
+
+  function noteServerEvent() {
+    S.lastEventAt = Date.now();
+    const hint = $("progressHint");
+    if (hint) hint.classList.add("hidden");
+  }
+
+  function startWatchdog() {
+    stopWatchdog();
+    S.watchdog = setInterval(() => {
+      const hint = $("progressHint");
+      if (!hint) return;
+      if (!S.busy) return;
+      const since = S.lastEventAt || S.startedAt || Date.now();
+      const idle = Date.now() - since;
+      if (idle < STALL_MS) {
+        hint.classList.add("hidden");
+        return;
+      }
+      hint.textContent = tfx(S.offline ? "stallHintOffline" : "stallHint", {
+        s: Math.round(idle / 1000),
+      });
+      hint.classList.remove("hidden");
+    }, 1000);
+  }
+
+  function stopWatchdog() {
+    if (S.watchdog) {
+      clearInterval(S.watchdog);
+      S.watchdog = 0;
+    }
+    const hint = $("progressHint");
+    if (hint) hint.classList.add("hidden");
+  }
+
+  /* Adopt the stage the server reports. A reload or a second tab has no socket
+     history, and the stage is the only thing that separates a slow encode from
+     a run that is over. */
+  function adoptPhase(live) {
+    if (!live || !live.name) return;
+    if (live.name === "sample") {
+      // The sampler has its own per-step readout; do not cover it with a timer.
+      stopPhaseUi();
+      $("progressPhase").textContent = tr("phaseSampling");
+      return;
+    }
+    startPhaseUi(live.name, !!live.slow, live.elapsed_ms || 0);
   }
 
   /* ======================================================================
@@ -1777,11 +1878,20 @@
     const jobId = S.jobId;
     if (!jobId) return;
     let item = null;
-    try { item = await api(`/api/jobs/${jobId}`); } catch (_) { return; }
+    try {
+      item = await api(`/api/jobs/${jobId}`);
+      S.offline = false;
+    } catch (_) {
+      // The server itself may be gone. Remember that, so the stall notice says
+      // "nothing is answering" instead of implying the render is still busy.
+      S.offline = true;
+      return;
+    }
     if (!item || S.jobId !== jobId) return;
     if (item.status === "succeeded") await applyJobComplete(jobId, item.image_url);
     else if (item.status === "failed") failJobUi(item.error || "");
     else if (item.status === "cancelled") cancelJobUi();
+    else if (item.status === "running") adoptPhase(item.live_phase);
   }
 
   function startJobPoll() {
@@ -1808,8 +1918,9 @@
     S.startedAt = Date.parse(running.created_at) || Date.now();
     setBusy(true);
     $("progress").classList.remove("hidden");
-    $("progressPhase").textContent = tr("phaseSampling");
     $("progressBar").style.width = "2%";
+    adoptPhase(running.live_phase);
+    if (!S.phaseName) $("progressPhase").textContent = tr("phaseSampling");
     startJobPoll();
   }
 
@@ -1858,9 +1969,9 @@
     $("progressText").textContent = "";
     $("progressBar").style.width = "2%";
     S.startedAt = Date.now();
-    // A fresh run must start from a clean slate even if a previous decode
-    // UI state somehow survived.
-    stopDecodeUi();
+    // A fresh run must start from a clean slate even if a previous stage UI
+    // state somehow survived.
+    stopPhaseUi();
     toast("ok", tr("toastQueued"), tfx("toastQueuedDetail", {
       model: modelLabel(S.modelKey), w: S.width, h: S.height, steps: S.steps,
     }));
@@ -1896,10 +2007,12 @@
 
     async function handleEvent(msg) {
       if (msg.type === "job_queued" && S.busy) {
+        noteServerEvent();
         S.startedAt = S.startedAt || Date.now();
         $("progressPhase").textContent = tr("phaseQueued");
       }
       if (msg.type === "load_start" || msg.type === "load_stage") {
+        noteServerEvent();
         $("progressPhase").textContent = tr("phaseLoading");
       }
       if (msg.type === "load_complete") {
@@ -1908,23 +2021,30 @@
         await refreshBootstrap().then(renderEnv).catch(() => {});
       }
       if (msg.type === "generate_start") {
-        $("progressPhase").textContent = tr("phaseLoading");
+        // The pipeline call is about to begin; the engine announces the real
+        // stages (conditioning, encode, decode) from here on.
+        noteServerEvent();
+        $("progressPhase").textContent = tr("phasePreparing");
       }
-      if (msg.type === "generate_phase" && msg.phase === "decode") {
-        // The real decode phase: announced by the engine the moment the VAE
-        // starts decoding. There is no per-step progress here — the sampler's
-        // 100% bar freezes, so switch to a sweeping bar and a live timer.
-        startDecodeUi(!!msg.slow);
+      if (msg.type === "generate_phase") {
+        // A real stage, announced by the engine the moment it is entered.
+        // These carry no per-step signal, so switch to a sweeping bar and a
+        // live timer — a stale 2% bar with a stale label is what a hang looks
+        // like from the outside.
+        noteServerEvent();
+        startPhaseUi(msg.phase, !!msg.slow);
       }
       if (msg.type === "generate_progress") {
+        noteServerEvent();
+        // Sampler steps only, and they always read as sampling: the old
+        // "step <= 2 → loading model" guess named a stage the run had already
+        // left, which is exactly what made an edit run look stuck.
+        stopPhaseUi();
         const total = msg.total || S.steps;
         const step = msg.step || 0;
         const pct = total ? step / total : 0;
         const elapsed = S.startedAt ? (Date.now() - S.startedAt) / 1000 : 0;
-        // Sampler steps only. The old "pct > 0.92 → decoding" guess renamed
-        // the phase while the sampler was still running and said nothing
-        // during the real (possibly minutes-long) decode.
-        $("progressPhase").textContent = step <= 2 ? tr("phaseLoading") : tr("phaseSampling");
+        $("progressPhase").textContent = tr("phaseSampling");
         $("progressBar").style.width = `${Math.round(pct * 100)}%`;
         $("progressText").textContent = [
           tfx("metaStep", { s: step, t: total }),
@@ -1933,6 +2053,7 @@
         ].filter(Boolean).join(" · ");
       }
       if (msg.type === "download_progress" && S.download.key) {
+        noteServerEvent();
         const total = msg.total;
         const n = msg.n || 0;
         S.download.bytes = n;

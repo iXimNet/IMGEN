@@ -92,10 +92,11 @@ def test_runtime_placement(device, memory, mode):
     assert runtime.choose_runtime(device, memory * 1024**3)["offload"] == mode
 
 
-def test_small_cuda_decodes_on_the_gpu_and_encodes_on_the_cpu(stack):
-    """The VAE splits by direction: encode is pinned to the CPU because it runs
-    while the transformer owns the GPU; decode borrows the GPU because by then
-    the sampler is done. A CPU decode was what made 1024px runs crawl."""
+def test_small_cuda_lends_the_gpu_to_both_vae_directions(stack):
+    """The VAE borrows the GPU for both of its turns: encode runs before the
+    sampler takes the GPU, decode after the sampler gives it back. Pinning
+    either direction to the CPU is what made 1024px runs crawl (an edit stalled
+    ~20 minutes in the encode, a text run the same in the decode)."""
     pipe = runtime.load_int4_pipeline("/snapshot", device="cuda:1", local_files_only=True)
     stack.loader.assert_called_once_with("/snapshot", dtype="bfloat16", local_files_only=True)
     block = pipe.transformer.enable_group_offload.call_args.kwargs
@@ -112,19 +113,46 @@ def test_small_cuda_decodes_on_the_gpu_and_encodes_on_the_cpu(stack):
     assert stack.torch.cuda.empty_cache.called
     encoded = pipe._encode_vae_image(Tensor("cuda:1", "float16"), "cpu-generator")
     assert encoded.device == "cuda:1" and encoded.dtype == "float16"
-    # The closure captured the original encode function; inspect its call via a separate test below.
+    assert pipe.vae.to.call_args_list[-1].args == ("cpu",)
+    # Both directions report where they ran, so the studio's warning follows the
+    # real path instead of the recipe.
     assert pipe.image21_runtime["offload"] == "group"
+    assert pipe.image21_runtime["vae_encode"] == "cuda"
     assert pipe.image21_runtime["vae_decode"] == "cuda"
     pipe.to.assert_not_called()
     pipe.enable_model_cpu_offload.assert_not_called()
 
 
-def test_group_encode_actually_runs_on_cpu(stack):
+def test_group_encode_hands_the_vae_back_to_the_cpu(stack):
     original = stack.pipe._encode_vae_image
     pipe = runtime.load_int4_pipeline("/snapshot", device="cuda")
     pipe._encode_vae_image(Tensor("cuda"), "cpu-generator")
     args = original.call_args.args
-    assert args[0].device == "cpu" and args[1] == "cpu-generator"
+    assert args[0].device == "cuda" and args[1] == "cpu-generator"
+    assert pipe.vae.to.call_args_list[-1].args == ("cpu",)
+
+
+def test_group_encode_out_of_memory_latches_back_to_the_cpu(stack):
+    """A run must always finish: an encode that cannot fit in VRAM re-runs on
+    the CPU, and the runtime says so instead of claiming the GPU."""
+    seen = []
+
+    def encode(image, generator):
+        seen.append(image)
+        if len(seen) == 1:
+            raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
+        return image
+
+    stack.pipe._encode_vae_image = Mock(side_effect=encode)
+    pipe = runtime.load_int4_pipeline("/snapshot", device="cuda")
+
+    encoded = pipe._encode_vae_image(Tensor("cuda"), "g")
+    assert len(seen) == 2 and seen[-1].device == "cpu"  # the retry ran on the CPU
+    assert encoded.device == "cuda"  # handed back on the caller's device
+    assert pipe.image21_runtime["vae_encode"] == "cpu"
+    moves_after_fallback = len(pipe.vae.to.call_args_list)
+    pipe._encode_vae_image(Tensor("cuda"), "g")
+    assert len(pipe.vae.to.call_args_list) == moves_after_fallback  # latched
 
 
 def test_large_cuda_uses_model_offload(stack):
@@ -143,7 +171,7 @@ def test_resident_devices_and_dtype_override(stack, monkeypatch, device):
     assert stack.loader.call_args.kwargs["dtype"] == "float16"
     assert pipe.image21_runtime == {
         "offload": "resident", "dtype": "float16", "device": device,
-        "use_stream": False, "vae_decode": device,
+        "use_stream": False, "vae_encode": device, "vae_decode": device,
     }
     pipe.enable_model_cpu_offload.assert_not_called()
 

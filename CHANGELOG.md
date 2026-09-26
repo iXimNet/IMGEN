@@ -203,6 +203,34 @@
   scrollbar itself stays hidden.
 
 ### Fixes
+- **An edit run no longer sits in a silent stage.** Everything around the
+  sampler — reading the prompt and the reference images, encoding those
+  references through the VAE, and the decode at the end — carries no per-step
+  signal, and all of it used to be invisible: the studio showed "载入模型（首次
+  较慢）" (set when the pipeline call starts) and the console said nothing, which
+  is exactly what a hang looks like. The engine now announces each stage the
+  moment it is really entered (`generate_phase` with `condition`, `encode` or
+  `decode`), times each one on the console, and reports the live stage through
+  `/api/jobs` so every tab — including one that just reloaded — can say what the
+  run is doing and for how long. Sampler steps always read as sampling: the old
+  "step ≤ 2 → loading model" label named a stage the run had already left.
+- **The VAE's encode direction borrows the accelerator as well.** Edit runs
+  encode their references *before* sampling, and that half of the VAE was still
+  pinned to the CPU, so a 1024px edit crawled for tens of minutes at the exact
+  point the studio could not see. Encode and decode now share one borrowing
+  helper: the VAE moves over for its turn, returns to the CPU afterwards, and a
+  turn that runs out of VRAM latches back to the CPU so the run still finishes.
+  Both directions report where they landed (`vae_encode` / `vae_decode`) — and
+  the fallback is now recorded where the studio actually reads it, which the
+  decode-only version of this was not.
+- **A run that stops reporting says so, and a stop really stops.** After a
+  minute without progress the studio states plainly that it has not heard
+  anything — it may still be encoding/decoding (check the console), or the
+  machine may be out of memory (turn VAE tiling on) — and when the server
+  itself stops answering it says that instead of implying progress. The engine
+  also checks the cancel flag at every stage boundary and after the pipeline
+  returns, so "stop" lands at the next boundary instead of after a whole run
+  nobody wants, and a stopped run is recorded as cancelled rather than failed.
 - **Decoding no longer runs on the CPU while the GPU sits idle.** INT4's
   small-card recipe pinned the VAE to the CPU for both directions, so a 1024px
   run finished its sampler in 30 s and then sat in "decoding" for tens of

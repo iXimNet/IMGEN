@@ -358,6 +358,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; }
 .progress .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.3s ease; }
 /* VAE decode has no per-step progress: sweep instead of a frozen 100% bar. */
 .progress .bar.pulse i { width: 34% !important; animation: progSweep 1.15s ease-in-out infinite; }
+/* A run that stops reporting: say so instead of implying progress. */
+.progress .phint { margin: 9px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--accent); }
 
 .toolbar { display: flex; gap: 8px; justify-content: center; padding: 0 16px 15px; }
 .viewport::-webkit-scrollbar { width: 11px; height: 11px; }

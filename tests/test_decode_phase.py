@@ -8,6 +8,8 @@ the wrapper never damages the VAE it borrows, the demo path keeps the same
 event shape, and a restart never leaves phantom "running" rows behind.
 """
 
+import time
+
 import pytest
 import torch
 from PIL import Image
@@ -16,7 +18,7 @@ fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from imgen.app import create_app  # noqa: E402
-from imgen.engine import Engine  # noqa: E402
+from imgen.engine import Engine, EngineError  # noqa: E402
 from imgen.history import History, new_id  # noqa: E402
 from imgen.int4_runtime import attach_split_vae  # noqa: E402
 from imgen.paths import AppPaths  # noqa: E402
@@ -46,6 +48,35 @@ class _FakePipe:
         self.vae.decode("latent-a")
         self.vae.decode("latent-b")
         self.decode_calls = 2
+        return type("Result", (), {"images": [Image.new("RGB", (8, 8))]})()
+
+
+class _FullPipe:
+    """A pipe with all three silent stages, shaped like the real one.
+
+    ``encode_prompt`` is a class method (so the shim must shadow it and then
+    step aside), and it is called twice — once for the prompt and once for the
+    negative prompt — which must still read as one stage.
+    """
+
+    def __init__(self, vae):
+        self.vae = vae
+        self.encode_calls = 0
+        self.encode_image_calls = 0
+
+    def encode_prompt(self, prompt, **kwargs):
+        self.encode_calls += 1
+        return f"embeds:{prompt}"
+
+    def _encode_vae_image(self, image, generator):
+        self.encode_image_calls += 1
+        return f"latents:{image}"
+
+    def __call__(self, **kwargs):
+        self.encode_prompt("sunset beach")
+        self.encode_prompt("")
+        self._encode_vae_image("reference", None)
+        self.vae.decode("latents")
         return type("Result", (), {"images": [Image.new("RGB", (8, 8))]})()
 
 
@@ -111,7 +142,9 @@ def test_run_pipe_flags_cpu_decode_and_preserves_instance_override():
     assert vae.decode("x") == "cpu-decoded"
 
 
-def test_demo_engine_emits_decode_phase_after_last_sampler_step():
+def test_demo_engine_walks_every_stage_in_order():
+    """Demo mirrors a real run: conditioning and VAE encode land before the
+    first sampler step, the decode after the last one."""
     engine = Engine(demo=True)
     events = []
 
@@ -130,14 +163,129 @@ def test_demo_engine_emits_decode_phase_after_last_sampler_step():
     )
 
     kinds = [e["type"] for e in events]
-    assert "generate_phase" in kinds
-    phase = events[kinds.index("generate_phase")]
-    assert phase["phase"] == "decode"
-    assert phase["slow"] is False
-    # It comes after every sampler step, never before.
-    assert kinds.index("generate_phase") > kinds.index("generate_progress")
+    phases = [e["phase"] for e in events if e["type"] == "generate_phase"]
+    assert phases == ["condition", "encode", "decode"]
+    first_progress = kinds.index("generate_progress")
+    decode_at = kinds.index("generate_phase", kinds.index("generate_progress"))
+    assert kinds.index("generate_phase") < first_progress
+    assert decode_at > max(i for i, kind in enumerate(kinds) if kind == "generate_progress")
     progress_steps = [e["step"] for e in events if e["type"] == "generate_progress"]
     assert progress_steps == [1, 2]
+
+
+def test_every_silent_stage_is_announced_once_and_restored():
+    """Each stage is announced the first time it is really entered, and the
+    hooks the pipeline owns come back exactly as they were."""
+    engine = Engine(demo=True)
+    events = []
+    pipe = _FullPipe(_ClassVae())
+
+    _run(engine, pipe, events)
+
+    phases = [e for e in events if e["type"] == "generate_phase"]
+    assert [p["phase"] for p in phases] == ["condition", "encode", "decode"]
+    assert all(p["slow"] is False for p in phases)
+    # Two encode_prompt calls are still one stage, announced once.
+    assert pipe.encode_calls == 2
+    assert len([p for p in phases if p["phase"] == "condition"]) == 1
+    # The class methods show through again.
+    assert "encode_prompt" not in vars(pipe)
+    assert "_encode_vae_image" not in vars(pipe)
+    assert pipe.encode_prompt("x") == "embeds:x"
+
+
+def test_every_silent_stage_is_timed_in_the_console(capsys):
+    engine = Engine(demo=True)
+    _run(engine, _FullPipe(_ClassVae()), [])
+
+    out = capsys.readouterr().out
+    assert "prompt and reference encoding started on" in out
+    assert "prompt and reference encoding finished in" in out
+    assert "VAE encode started on" in out
+    assert "VAE encode finished in" in out
+    assert "VAE decode started on" in out
+    assert "VAE decode finished in" in out
+    # Two conditioning calls are reported as such rather than looking like two
+    # separate stages.
+    assert "(2 calls)" in out
+
+
+def test_phase_status_reports_the_live_stage():
+    engine = Engine(demo=True)
+    seen = {}
+
+    class _ProbeVae(_ClassVae):
+        def decode(self, latents, *args, **kwargs):
+            seen.update(engine.phase_status() or {})
+            return "decoded"
+
+    _run(engine, _FakePipe(_ProbeVae()), [])
+
+    assert seen["name"] == "decode"
+    assert seen["slow"] is False
+    assert seen["elapsed_ms"] >= 0
+
+
+def test_phase_status_is_cleared_when_the_run_ends():
+    engine = Engine(demo=True)
+    engine.generate(
+        {
+            "mode": "generate",
+            "model_key": "qwen-image-2.1",
+            "hub": "huggingface",
+            "prompt": "phase probe",
+            "steps": 2,
+        },
+        callback=lambda _e: None,
+    )
+    assert engine.phase_status() is None
+
+
+def test_a_stop_at_a_stage_boundary_ends_the_run_as_cancelled():
+    """Nothing checks the flag inside a minutes-long encode, so the boundary
+    check is what makes "stop" land in seconds."""
+    engine = Engine(demo=True)
+
+    class _CancellingVae(_ClassVae):
+        def decode(self, latents, *args, **kwargs):
+            engine.cancel()
+            return "decoded"
+
+    with pytest.raises(EngineError) as raised:
+        _run(engine, _FakePipe(_CancellingVae()), [])
+    assert raised.value.code == "CANCELLED"
+
+
+def test_a_stop_pressed_before_the_run_starts_never_enters_the_pipeline():
+    engine = Engine(demo=True)
+    engine.cancel()
+    pipe = _FullPipe(_ClassVae())
+
+    with pytest.raises(EngineError) as raised:
+        _run(engine, pipe, [])
+
+    assert raised.value.code == "CANCELLED"
+    assert pipe.encode_calls == 0
+
+
+def test_a_stop_inside_the_last_stage_is_not_reported_as_a_finished_run():
+    """The sampler honours the flag between steps, but a run stopped during the
+    decode would otherwise be saved as a success nobody asked for."""
+    engine = Engine(demo=True)
+
+    class _LateVae:
+        def __init__(self):
+            self.calls = 0
+
+        def decode(self, latents, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 2:
+                engine.cancel()
+            return "decoded"
+
+    with pytest.raises(EngineError) as raised:
+        _run(engine, _FakePipe(_LateVae()), [])
+    assert raised.value.code == "CANCELLED"
 
 
 def _seed_job(history: History, status: str) -> str:
@@ -234,21 +382,26 @@ class _RecordingVae(torch.nn.Module):
 class _VaeHost:
     """Minimal pipe: what attach_split_vae touches and nothing more."""
 
-    def __init__(self, vae):
+    def __init__(self, vae, encode_error=None):
         self.vae = vae
+        self.encode_error = encode_error
+        self.encode_calls = 0
 
     def _encode_vae_image(self, image, generator):
+        self.encode_calls += 1
+        if self.encode_error and image.device.type == "cuda" and self.encode_calls == 1:
+            raise RuntimeError(self.encode_error)
         return image
 
 
-def test_split_vae_reports_the_decode_device_and_keeps_encode_on_cpu():
+def test_split_vae_reports_the_devices_and_keeps_a_cpu_only_run_on_the_cpu():
     spec = {"offload": "group"}
     vae = _RecordingVae()
     pipe = _VaeHost(vae)
 
     attach_split_vae(pipe, spec, torch.device("cpu"))
 
-    assert spec["vae_decode"] == "cpu"
+    assert spec["vae_decode"] == "cpu" and spec["vae_encode"] == "cpu"
     assert vae.moves[0] == "cpu"  # the resident copy never leaves the CPU
     decoded = pipe.vae.decode(torch.zeros(1, 4, 4, 4))
     assert decoded.device.type == "cpu"
@@ -257,23 +410,44 @@ def test_split_vae_reports_the_decode_device_and_keeps_encode_on_cpu():
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
-def test_split_vae_borrows_the_gpu_for_decode_and_gives_it_back():
+def test_split_vae_lends_the_gpu_to_both_directions_and_takes_it_back():
     spec = {"offload": "group"}
     vae = _RecordingVae()
     pipe = _VaeHost(vae)
 
     attach_split_vae(pipe, spec, torch.device("cuda", 0))
-    assert spec["vae_decode"] == "cuda"
+    assert spec["vae_decode"] == "cuda" and spec["vae_encode"] == "cuda"
 
     decoded = pipe.vae.decode(torch.zeros(1, 4, 4, 4))
     assert decoded.device.type == "cuda"
-    # Handed back for the next sampling run — that is the whole point.
+    # Handed back for the sampler — that is the whole point.
     assert vae.weight.device.type == "cpu"
     assert vae.moves[-1] == "cpu"
-    # Encode still never touches the GPU: it runs while the transformer owns it.
-    moves_before_encode = len(vae.moves)
-    pipe._encode_vae_image(torch.zeros(1, 3, 8, 8), None)
-    assert len(vae.moves) == moves_before_encode
+
+    encoded = pipe._encode_vae_image(torch.zeros(1, 3, 8, 8, device="cuda"), None)
+    assert encoded.device.type == "cuda"
+    assert vae.weight.device.type == "cpu"
+    assert vae.moves[-1] == "cpu"
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_gpu_encode_out_of_memory_latches_back_to_the_cpu():
+    """An edit run must still finish when the references do not fit: the encode
+    re-runs on the CPU and the runtime stops claiming the GPU."""
+    spec = {"offload": "group"}
+    vae = _RecordingVae()
+    pipe = _VaeHost(vae, encode_error="CUDA out of memory. Tried to allocate 3.00 GiB")
+    attach_split_vae(pipe, spec, torch.device("cuda", 0))
+
+    encoded = pipe._encode_vae_image(torch.zeros(1, 3, 8, 8, device="cuda"), None)
+
+    assert pipe.encode_calls == 2  # the CPU retry really ran
+    assert encoded.device.type == "cuda"  # returned on the caller's device
+    assert spec["vae_encode"] == "cpu"
+    assert vae.weight.device.type == "cpu"
+    moves_after_fallback = len(vae.moves)
+    pipe._encode_vae_image(torch.zeros(1, 3, 8, 8, device="cuda"), None)
+    assert len(vae.moves) == moves_after_fallback  # latched: no more GPU trips
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
@@ -292,6 +466,61 @@ def test_gpu_decode_out_of_memory_latches_back_to_the_cpu():
     moves_after_fallback = len(vae.moves)
     pipe.vae.decode(torch.zeros(1, 4, 4, 4))
     assert len(vae.moves) == moves_after_fallback  # latched: no more GPU trips
+
+
+def test_a_running_job_reports_the_live_stage(tmp_path, monkeypatch):
+    """The poll carries the stage, so "still encoding, be patient" and "nothing
+    is happening" stop looking the same from the browser."""
+    monkeypatch.setenv("IMGEN_DEMO", "1")
+    app = create_app(demo=True, home=tmp_path)
+    engine = app.state.engine
+    stale = _seed_job(app.state.history, "running")
+    engine._mark_phase("encode", True)
+
+    with TestClient(app) as client:
+        live = client.get(f"/api/jobs/{stale}").json()
+        listed = client.get("/api/jobs").json()["items"]
+
+    assert live["live_phase"]["name"] == "encode"
+    assert live["live_phase"]["slow"] is True
+    assert isinstance(live["live_phase"]["elapsed_ms"], int)
+    assert listed[0]["live_phase"]["name"] == "encode"
+
+
+def test_a_finished_job_carries_no_live_stage(tmp_path, monkeypatch):
+    monkeypatch.setenv("IMGEN_DEMO", "1")
+    app = create_app(demo=True, home=tmp_path)
+    done = _seed_job(app.state.history, "succeeded")
+    app.state.engine._mark_phase("decode", False)
+
+    with TestClient(app) as client:
+        got = client.get(f"/api/jobs/{done}").json()
+
+    assert "live_phase" not in got
+
+
+def test_a_cancelled_run_is_recorded_as_cancelled_not_failed(tmp_path, monkeypatch):
+    """A stop request that lands at a stage boundary must read as cancelled —
+    a red "failed" toast is the wrong story."""
+    monkeypatch.setenv("IMGEN_DEMO", "1")
+    app = create_app(demo=True, home=tmp_path)
+
+    def cancelled(request, callback=None):
+        raise EngineError("Cancelled.", "CANCELLED")
+
+    monkeypatch.setattr(app.state.engine, "generate", cancelled)
+
+    with TestClient(app) as client:
+        job = client.post("/api/jobs", data={"mode": "generate", "prompt": "cancel probe"}).json()
+        row = {"status": "running", "error": None}
+        for _ in range(60):
+            row = client.get(f"/api/jobs/{job['id']}").json()
+            if row["status"] != "running":
+                break
+            time.sleep(0.05)
+
+    assert row["status"] == "cancelled"
+    assert row["error"] and "Cancelled" in row["error"]
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
