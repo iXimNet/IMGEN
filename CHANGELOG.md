@@ -212,6 +212,20 @@
 - Toast messages carry a human line plus the backend detail, with a close button.
 - `--demo` reports the new per-source weight fields, so the popover no longer
   came up empty in demo mode.
+- **ModelScope downloads now report progress and are found afterwards.** Three
+  defects compounded: the studio only probed the pre-1.38 cache layout
+  (`hub/models/<owner>/<name>`) while current SDKs write
+  `models/<owner>--<name>/snapshots/<revision>/`, so a finished download looked
+  absent and the Download button came straight back; the progress watcher
+  reported `total: null` (and sampled the whole cache root rather than the
+  repo), so the row sat at 0% even while bytes were landing; and the ignore
+  patterns were regex-style (`.*\.png$`) while ModelScope matches with
+  `fnmatch`, where `$` is a literal — nothing was ever skipped, so README and
+  every gallery image came down with the weights. The lookup now walks both
+  layouts and descends into `snapshots/`, the watcher derives a real byte total
+  from the remote file list (falling back to a byte readout when that listing
+  fails) and samples only the repo's own directory, and one glob pattern list
+  serves both hubs.
 
 ## 0.1.0 — 2026-09-21
 

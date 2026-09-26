@@ -35,7 +35,7 @@
     historyLoading: false,
     presetCat: null,
     detailId: null,
-    download: { key: null, pct: 0 },
+    download: { key: null, pct: 0, bytes: 0, total: null },
   };
 
   const $ = (id) => document.getElementById(id);
@@ -83,6 +83,14 @@
     if (!Number.isFinite(n) || n <= 0) return 0;
     return Math.max(32, Math.floor(n / 32) * 32);
   };
+  /* Byte counts for download readouts, e.g. 1.4 GB / 512 MB. */
+  function fmtBytes(bytes) {
+    const n = Number(bytes) || 0;
+    if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
+    if (n >= 1024 ** 2) return `${Math.round(n / 1024 ** 2)} MB`;
+    if (n >= 1024) return `${Math.round(n / 1024)} KB`;
+    return `${n} B`;
+  }
   function areaSize(side, ratio) {
     const w = Math.sqrt(side * side * ratio);
     const h = w / ratio;
@@ -1270,6 +1278,17 @@
       else if (model.incomplete_any) meta = `${tfx("weightsIncompleteShort", { n: model.missing_count })} · ${size}`;
       else meta = `${note || tr("notDownloaded")} · ${size}`;
 
+      // A percentage needs a known total. When the source cannot report one
+      // (e.g. a remote listing failed), show the bytes received instead of a
+      // frozen 0% — a stalled number reads as "broken", a moving one does not.
+      const received = S.download.key === model.key ? S.download.bytes : 0;
+      const readout = S.download.total
+        ? `${S.download.pct}%`
+        : received
+          ? tfx("downloadedSoFar", { size: fmtBytes(received) })
+          : "…";
+      const barPct = S.download.total ? S.download.pct : 0;
+
       // The caveat line only replaces the state text when the weights are
       // absent; a downloaded model keeps the note on hover.
       const row = document.createElement("div");
@@ -1279,9 +1298,9 @@
         `<span class="mid"${note ? ` title="${esc(note)}"` : ""}><b>${esc(model.label)} · ${esc(model.precision)}</b>` +
         `<span>${esc(meta)}</span></span>` +
         (busy
-          ? `<span class="mini plain">${S.download.pct}%</span>`
+          ? `<span class="mini plain">${esc(readout)}</span>`
           : `<button type="button" class="mini" data-dl>${icon("i-download", 12)}${esc(model.downloaded ? tr("redownload") : model.incomplete_any ? tr("resumeDownload") : tr("downloadNow"))}</button>`) +
-        (busy ? `<span class="prog"><i style="width:${S.download.pct}%"></i></span>` : "");
+        (busy ? `<span class="prog${S.download.total ? "" : " pulse"}"><i style="width:${barPct}%"></i></span>` : "");
       row.onclick = (event) => {
         if (event.target.closest("[data-dl]")) {
           event.stopPropagation();
@@ -1372,7 +1391,7 @@
   async function startDownload(model, force) {
     if (S.download.key) return;
     await persistCredentials();
-    S.download = { key: model.key, pct: 0 };
+    S.download = { key: model.key, pct: 0, bytes: 0, total: null };
     renderWeightsList();
     toast("ok", tfx("toastDownloadStart", { label: model.label }),
       tfx("toastDownloadStartDetail", { hub: hubLabel(S.hub), gb: model.approx_gb }));
@@ -1383,7 +1402,7 @@
         body: JSON.stringify({ model_key: model.key, hub: S.hub, force: !!force }),
       });
     } catch (err) {
-      S.download = { key: null, pct: 0 };
+      S.download = { key: null, pct: 0, bytes: 0, total: null };
       renderWeightsList();
       reportError(err);
     }
@@ -1618,12 +1637,16 @@
       if (msg.type === "download_progress" && S.download.key) {
         const total = msg.total;
         const n = msg.n || 0;
+        S.download.bytes = n;
+        S.download.total = total || null;
+        // The source may not know the total up front (a remote listing can
+        // fail). Fall back to a byte readout rather than a frozen 0%.
         if (total) S.download.pct = clamp(Math.round((n / total) * 100), 1, 99);
         renderWeightsList();
       }
       if (msg.type === "download_ok" || msg.type === "download_complete") {
         const label = modelLabel(msg.model_key || S.download.key);
-        S.download = { key: null, pct: 0 };
+        S.download = { key: null, pct: 0, bytes: 0, total: null };
         toast("ok", tfx("toastReady", { label }), tr("toastReadyDetail"));
         try {
           await refreshBootstrap();
@@ -1651,7 +1674,7 @@
       }
       if (msg.type === "error") {
         setBusy(false);
-        S.download = { key: null, pct: 0 };
+        S.download = { key: null, pct: 0, bytes: 0, total: null };
         renderWeightsList();
         toast("err", tr("errFailed"), msg.message || "");
         // A failed load is what turns the dot red — pick it up right away.

@@ -5,12 +5,18 @@ import pytest
 
 from imgen.constants import repo_id
 from imgen.hub import (
+    HF_IGNORE_PATTERNS,
+    MS_IGNORE_PATTERNS,
+    _modelscope_repo_dirs,
+    _ms_matches_any,
     hub_cache_root,
     hub_snapshot_state,
     hub_storage,
     missing_weight_files,
+    model_local_path,
     model_status,
     resolve_local_hub,
+    resolve_snapshot_dir,
     snapshot_is_complete,
 )
 
@@ -134,6 +140,136 @@ def test_modelscope_hub_models_layout_is_discovered(tmp_path, monkeypatch, model
 
     assert state["complete"] is True
     assert state["path"] == snap
+
+
+@pytest.mark.parametrize("model_key", ["image21-int8", "image21-int4", "qwen-image-2.1"])
+def test_modelscope_current_layout_is_discovered(tmp_path, monkeypatch, model_key):
+    """Current SDKs write `models/<owner>--<name>/snapshots/<revision>/`.
+
+    Missing this layout made a finished download look absent: the studio showed
+    the Download button again and generation refused with NOT_DOWNLOADED.
+    """
+    _isolate_caches(tmp_path, monkeypatch)
+    repo = repo_id(model_key, "modelscope")
+    owner, name = repo.split("/", 1)
+    snap = _complete_snapshot(
+        tmp_path
+        / "modelscope"
+        / "models"
+        / f"{owner}--{name}"
+        / "snapshots"
+        / "master"
+    )
+
+    assert model_local_path(model_key, "modelscope") == snap
+    state = hub_snapshot_state(model_key, "modelscope")
+    assert state["complete"] is True
+    assert state["missing"] == []
+
+    row = {item["key"]: item for item in model_status("modelscope")}[model_key]
+    assert row["downloaded"] is True
+    assert row["downloaded_any"] is True
+    assert row["local_hub"] == "modelscope"
+    assert row["incomplete_any"] is False
+
+
+def test_modelscope_snapshot_revision_is_picked_within_repo_dir(tmp_path, monkeypatch):
+    """A repo dir alone is not a snapshot; the revision folder underneath is."""
+    _isolate_caches(tmp_path, monkeypatch)
+    repo = repo_id("image21-int8", "modelscope")
+    owner, name = repo.split("/", 1)
+    repo_dir = tmp_path / "modelscope" / "models" / f"{owner}--{name}"
+    older = _complete_snapshot(repo_dir / "snapshots" / "aaa111")
+    newer = _complete_snapshot(repo_dir / "snapshots" / "zzz999")
+
+    found = model_local_path("image21-int8", "modelscope")
+
+    assert found in (older, newer)
+    assert found.parent.name == "snapshots", "must return the revision dir, not the repo root"
+
+
+def test_resolve_snapshot_dir_descends_into_snapshots(tmp_path):
+    """The downloader may return the repo root; resolution finds the revision."""
+    repo_dir = tmp_path / "models--acme--thing"
+    snap = _complete_snapshot(repo_dir / "snapshots" / "master")
+
+    assert resolve_snapshot_dir(repo_dir) == snap
+    assert resolve_snapshot_dir(snap) == snap
+
+
+def test_modelscope_repo_dirs_are_unique(tmp_path):
+    """Candidate probing must not scan the same directory twice."""
+    dirs = _modelscope_repo_dirs(tmp_path, "iximbox/Image21-INT8")
+
+    assert len(dirs) == len({str(item) for item in dirs})
+
+
+@pytest.mark.parametrize("model_key", ["image21-int8", "image21-int4"])
+def test_modelscope_ignore_patterns_actually_match(tmp_path, monkeypatch, model_key):
+    """The ModelScope client matches with fnmatch, not regex.
+
+    The old regex-style patterns (`.*\\.png$`) never matched anything — `$` is
+    a literal to fnmatch — so README.md and every gallery image were fetched.
+    """
+    # Files the SDK must skip.
+    for path in (
+        "README.md",
+        "evaluation/gallery/01.png",
+        "assets/teaser.jpg",
+        "docs/preview.webp",
+        "cards/card.png",
+        "scripts/run.sh",
+        "benchmarks/results.json",
+        "tests/test_x.py",
+    ):
+        assert _ms_matches_any(path, MS_IGNORE_PATTERNS), f"{path} should be skipped"
+
+    # Files the SDK must keep: weight shards and their configs.
+    for path in (
+        "model_index.json",
+        "transformer/diffusion_pytorch_model.safetensors",
+        "transformer/diffusion_pytorch_model-00001-of-00002.safetensors",
+        "text_encoder/model.safetensors",
+        "vae/diffusion_pytorch_model.safetensors",
+        "scheduler/scheduler_config.json",
+        "tokenizer/vocab.json",
+    ):
+        assert not _ms_matches_any(path, MS_IGNORE_PATTERNS), f"{path} must be kept"
+
+
+def test_ignore_patterns_agree_across_hubs():
+    """Both hubs must skip the same set, or a source switch changes the bytes.
+
+    Verified through each hub's own matcher: Hugging Face uses
+    ``huggingface_hub.utils._paths.fnmatchcase`` and ModelScope uses
+    ``modelscope_hub._download._matches_patterns``.
+    """
+    hf_fnmatch = pytest.importorskip("huggingface_hub.utils._paths").fnmatchcase
+
+    def hf_ignores(path: str) -> bool:
+        return any(hf_fnmatch(path, pattern) for pattern in HF_IGNORE_PATTERNS)
+
+    samples = [
+        "README.md",
+        "evaluation/gallery/01.png",
+        "assets/teaser.jpg",
+        "docs/preview.webp",
+        "cards/card.png",
+        "scripts/run.sh",
+        "benchmarks/results.json",
+        "tests/test_x.py",
+        "model_index.json",
+        "transformer/diffusion_pytorch_model.safetensors",
+        "text_encoder/model.safetensors",
+        "vae/diffusion_pytorch_model.safetensors",
+        "scheduler/scheduler_config.json",
+    ]
+    for path in samples:
+        assert hf_ignores(path) == _ms_matches_any(
+            path, MS_IGNORE_PATTERNS
+        ), f"hubs disagree about {path}"
+
+    assert HF_IGNORE_PATTERNS == MS_IGNORE_PATTERNS, "one list serves both hubs"
 
 
 @pytest.mark.parametrize("model_key", ["image21-int8", "image21-int4"])

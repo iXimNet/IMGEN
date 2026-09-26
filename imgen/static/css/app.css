@@ -474,6 +474,12 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; }
 .model-tag.muted { color: var(--ink-faint); }
 .model-row .prog { grid-column: 1 / -1; height: 3px; border-radius: 99px; background: #25282c; overflow: hidden; margin-top: 3px; }
 .model-row .prog i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.25s linear; }
+/* No known total: an empty bar would read as "stalled", so sweep it instead. */
+.model-row .prog.pulse i { width: 34% !important; animation: progSweep 1.15s ease-in-out infinite; }
+@keyframes progSweep {
+  0%   { transform: translateX(-105%); }
+  100% { transform: translateX(300%); }
+}
 
 /* ==========================================================================
    History detail overlay

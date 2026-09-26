@@ -362,6 +362,10 @@ def test_apply_i18n_reruns_every_language_dependent_renderer(client):
     import re
 
     js = client.get("/js/app.js").text
+    # Normalise line endings: this scans the source for `\n  }` block ends, and
+    # a Windows checkout (or an editor that writes CRLF) would otherwise make
+    # every block look unterminated.
+    js = js.replace("\r\n", "\n").replace("\r", "\n")
     body = js[js.index("function applyI18n"):]
     body = body[: body.index("\n  }")]
 
