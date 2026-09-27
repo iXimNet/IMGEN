@@ -153,6 +153,52 @@ server — see **Multi-image runs** below.
   scrollable back to its top-left, but at fit size its rounded dimensions left a
   few pixels of overflow; scrollbar chrome now appears only once the view is
   actually pannable, and the wrapper is capped while it is not.
+- **The overlay is two columns now: picture left, panel right.** The old layout
+  stacked a header band, the picture and a footer band, and the picture is
+  height-bound — measured 677×677 in a 1145×721 viewport, with 424px of unused
+  width. Every row spent on chrome was a row the picture did not get. The bands
+  are gone; the panel carries the title, the metadata, the thumbnails and the
+  actions, so the picture keeps the full height of its column: **774×774, +14.3%**,
+  with chrome down from 197px to 166px (21% → 17% of the overlay).
+- The panel is a three-row grid — head (`详情` + prev/next/close), scrolled body,
+  fixed action row — so the actions never scroll away from the record.
+- A **任务** group joins the spec sheet: when the run happened (full timestamp),
+  whether it was a generate or an edit, its status, and the record id. Status
+  moved down from the old header pill rather than being dropped, and failed runs
+  now show `error` here too — otherwise the reason disappeared with the pill.
+- The id is **selectable** — it is the one value a user may need to copy into a
+  bug report or a filename. It sits in the stage's top-left corner under the same
+  rule as the zoom bar (fades in with the pointer, permanently visible on a
+  touch device). It takes pointer events only while visible; leaving it
+  permanently clickable would silently swallow drags started in that corner.
+  **Each frame shows its own id** (`{run}` for the first, `{run}_1` … after) —
+  they used to all print the run id, which made a four-image run look like four
+  copies of one file. A reference has no id of its own (it is stored as
+  `refs/{run}/ref_{nn}.png`), so the box is hidden rather than filled with a
+  made-up value.
+- **Card spacing now has an order**: label→value 2px < row→row 6px < row→card edge
+  10px. The padding moved from the cells to the card so the edge gap is
+  independent of the row gap; previously the row gap (10px) exceeded the edge
+  gap (5px), which read as cramped despite the generous spacing.
+- Thumbnails moved into the panel and wrap into a grid — a 360px column cannot
+  scroll a single row without hiding half of it. The group is named **on its
+  first tile** (`成图` / `参考图`, above the tile so the picture stays
+  unobstructed), left-aligned with that tile, instead of by a heading that
+  restated itself. A lone reference now shows at all; the old rule required more
+  than one picture in total.
+- **The prompt folds past five lines** with a right-aligned "显示全部" link, and
+  the negative prompt folds the same way. The link only appears when the text
+  actually overflows — a control that reveals nothing is worse than no control.
+  `-webkit-line-clamp` turned out to be a no-op in this Chromium build, so the
+  fold is a `max-height` locked to a whole number of lines plus a fade; leaving
+  `padding-bottom` in place let the next line show through the transparent
+  padding, which is why the first fix still leaked half a line.
+- Download moved into the zoom bar under the picture (both act on the frame on
+  screen), and the "第 N / M 张" counter is gone — the highlighted tile already
+  says which frame the buttons will act on.
+- Delete sits alone at the left of the action row, spaced away from reuse and
+  send-to-edit. Its confirmation now stacks: the message takes its own row with
+  the buttons beneath, instead of squeezing both onto one line.
 
 ### Top bar
 - **New brand mark: an aperture ring around a glowing safelight core.** The old
@@ -162,6 +208,14 @@ server — see **Multi-image runs** below.
   image studio. It lives in the sprite as `#i-brand` on a 48-unit grid and is
   drawn at 22px in the header; the favicon uses the same artwork with the ticks
   reduced from eight to four, because eight turns to mush at 16px.
+- **The wordmark is artwork now.** The supplied IMGEN logotype ships as a
+  transparent PNG (`imgen/static/brand/`) instead of live text next to the mark.
+  The header takes `imgen-wordmark-dark.png` — the original is near-black, which
+  on `#16181b` measures **1.00:1** and is invisible; reversing it to `--ink`
+  gives 14.7:1. The README takes the original black at 17.8:1, and a gold variant
+  is kept as a spare. `alt` carries the name and follows `data-i-alt`, so the
+  accessible label still switches language (`IMGEN` is the same in both).
+  Below 460px the wordmark is dropped and the mark stands alone.
 - The status pill opens a runtime popover that switches between weights already
   on disk, with a "download more models" entry.
 - A **GitHub** icon at the far right links to the repository. It is a real
@@ -179,6 +233,27 @@ server — see **Multi-image runs** below.
 - `Engine` gained `last_error`, cleared when a load starts and set when one
   fails, so health has its own field instead of being inferred from `loaded`.
   `load_complete` and error events refresh the pill live — no reload needed.
+- **The pill sizes to its content instead of a fixed cap.** It was capped at
+  340px, which cut "ModelScope 魔搭" down to "Model…" on this machine — the three
+  things it names (device, model, source) all vary per machine, so a fixed number
+  guarantees truncation on some configuration. It now grows with its text and
+  only shrinks when the bar genuinely runs out of room, with a 56px floor so a
+  squeezed pill still shows its dot and chevron. Both halves are clipped to the
+  rounded edge while shrinking; a flex container does not clip by default, so the
+  chevron was ending up outside the border.
+- **It no longer names a weight source at all.** `S.hub` is the *preference* —
+  what the config says or what was last picked in the sheet — not where the
+  weights came from: `resolve_local_hub` silently falls back to whichever source
+  actually holds a snapshot, logging "using weights from X (Y has no local copy)"
+  while the pill still showed Y. It was wrong on exactly the configuration it
+  appeared to describe. The sheet behind the pill reports `local_hub`, the real
+  location, and every history record stores the resolved value, so nothing is
+  lost. The pill is 82px narrower for it.
+- **Below 900px the top bar no longer repeats the mode switch.** The bottom bar
+  carries its own 生图/改图 next to the run button — the one in reach there — so
+  the top bar's copy spent 166px restating it, and was the reason the status pill
+  had to shrink at all. With the duplicate gone, every width from 380px to 1920px
+  measures zero overflow in the bar.
 
 ### Model & download
 - Renamed from "Settings" (it used to inherit the title "Generation settings").
@@ -247,7 +322,10 @@ server — see **Multi-image runs** below.
   used. The frontend reads `sizes.default_scale` instead of hard-coding a table.
 - The parameter copy no longer sells anything as an official recommendation:
   `原生 2K（官方推荐）`, the `官方推荐` note next to 步数, and "这是官方默认" in the
-  CFG tip are gone. Scale chips are descriptive — `原生 2K` and `1K · 更省显存`.
+  CFG tip are gone. Scale chips are descriptive — `原生 2K` and `1K`. The `1K`
+  chip dropped its `更省显存` subtitle, which brought the segmented control to the
+  same height as the other single-line controls (36px) — the reserved subtitle
+  row inside `.seg` was pure height once the subtitle was gone.
 - The Image21-INT8 note no longer says "edit at 2048 with VAE tiling". It now
   reads "start edits at 1024, keep VAE tiling off", and stays reachable as a
   hover title on the model row instead of only appearing while undownloaded.
@@ -262,6 +340,34 @@ server — see **Multi-image runs** below.
   scrollbar itself stays hidden.
 
 ### Fixes
+- **"送到改图" stayed enabled on a record with no picture.** The rewrite that
+  moved the actions into the panel kept the dimmed styling but dropped the
+  `disabled` attribute, so the button still took focus and clicks and would send
+  an empty source. It disables together with download now, and carries the same
+  `dim` treatment.
+- **The prompt fold measured while the overlay was still hidden.** Sizes are all
+  zero under `display: none`, so `scrollHeight > clientHeight` was never true and
+  the "显示全部" link never appeared for any prompt, however long. The fold is
+  wired after the overlay is shown; the language switch re-runs it, since the
+  link text changes with the language.
+- **`-webkit-line-clamp` was doing nothing, here and in the history cards.** This
+  Chromium build normalises `display: -webkit-box` to `flow-root` and does not
+  recognise the standard `line-clamp` at all (the computed value is `null`), so
+  every clamp silently did nothing. The visible symptom was a prompt box at the
+  right height with the next line showing through underneath. Both places now use
+  a `max-height` locked to a whole number of lines plus a bottom fade, with
+  `padding-bottom: 0` while folded — the transparent padding is what let the extra
+  line show.
+- **The history card summary was never truncated either** — same root cause. Its
+  two-line clamp has been a no-op since it was written, so long prompts ran the
+  card on for as many lines as they needed.
+- **"打开预置库" on the empty stage did nothing.** The card forwarded a synthetic
+  `.click()` to the toolbar button. That opened the popover during the target
+  phase, but the *original* click kept bubbling to `document`, whose
+  outside-click rule does not treat the card as a trigger — so it closed the
+  popover again inside the same event. The card and the button now share one
+  handler instead of one forwarding to the other, which stops the event where it
+  should and also lets the card close an open popover like the button does.
 - **An edit run no longer sits in a silent stage.** Everything around the
   sampler — reading the prompt and the reference images, encoding those
   references through the VAE, and the decode at the end — carries no per-step

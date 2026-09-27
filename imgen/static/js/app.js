@@ -79,6 +79,8 @@
   const modelLabel = (key) => (modelByKey(key) || {}).label || key;
   const hubLabel = (key) => (key === "modelscope" ? tr("hubMs") : tr("hubHf"));
   const maxRefs = () => defaults().max_reference_images || 10;
+  const defaultSteps = () => defaults().steps || 40;
+  const maxImages = () => defaults().max_images || 4;
   /* Tiling is opt-in now. "auto" is a legacy value meaning "resolution decided"
      — it resolves to off, so the select must show it that way. */
   const vaeTilingValue = (raw) => {
@@ -119,7 +121,24 @@
     const snap = (n) => Math.max(32, Math.round(n / 32) * 32);
     return [snap(w), snap(h)];
   }
+  /* The proportion actually on screen, for a width/height pair that is not one
+     of the presets. Reducing by the gcd gives the honest label (`3:2`, not
+     `1:1`); when the pair shares no useful divisor, a decimal says it better
+     than a ratio nobody can read. */
+  function ratioLabel(w, h) {
+    if (!w || !h) return null;
+    const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+    const g = gcd(w, h);
+    const rw = w / g;
+    const rh = h / g;
+    if (g > 1 && rw <= 40 && rh <= 40) return `${rw}:${rh}`;
+    return `${(w / h).toFixed(2)}:1`;
+  }
   const followsRef = () => S.mode === "edit" && $("follow").getAttribute("aria-checked") === "true";
+  /* The shortcut hint names the key the user actually has. The handler accepts
+     either modifier, but only one of the two glyphs is on their keyboard. */
+  const isMac = () => /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
+  const runKey = () => (isMac() ? "⌘↵" : "Ctrl↵");
 
   /* ======================================================================
      API
@@ -326,26 +345,26 @@
      i18n
      ====================================================================== */
   /* Re-render the open detail overlay in the current language. It needs the
-     record, so `applyI18n` cannot call the renderers directly. */
+     record, so `applyI18n` cannot call the renderers directly. The panel's own
+     title is a `data-i` node and is handled by `applyI18n` itself. */
   function refreshOpenDetail() {
     if ($("detail").classList.contains("hidden") || !S.detailId) return;
     const item = S.history.find((row) => row.id === S.detailId);
     if (!item) return;
-    const status = STATUS[item.status] || STATUS.succeeded;
-    $("dTitle").textContent = item.mode === "edit" ? tr("detailTitleEdit") : tr("detailTitleGen");
-    $("dStatus").className = `pill ${status[2]}`.trim();
-    $("dStatus").querySelector("use").setAttribute("href", `#${status[1]}`);
-    $("dStatusText").textContent = tr(status[0]);
     renderDetailMeta(item);
     renderDetailRefs(item);
-    renderDetailFootNote(item);
     renderDetailFooter(item);
+    // The blocks are rebuilt, so their fold state has to be re-established.
+    wirePromptFolds();
   }
 
   function applyI18n() {
     document.documentElement.lang = S.lang === "zh" ? "zh-Hans" : "en";
     $$("[data-i]").forEach((el) => { el.textContent = tr(el.getAttribute("data-i")); });
     $$("[data-i-placeholder]").forEach((el) => { el.placeholder = tr(el.getAttribute("data-i-placeholder")); });
+    // Some nodes carry their text in an attribute rather than as content — the
+    // brand wordmark is an image, so its accessible name is the `alt`.
+    $$("[data-i-alt]").forEach((el) => { el.alt = tr(el.getAttribute("data-i-alt")); });
     $("negative").placeholder = defaults().negative_placeholder || tr("negativePh");
     $("historySearch").placeholder = tr("searchHistory");
     $("presetSearch").placeholder = tr("presetsSearch");
@@ -377,6 +396,8 @@
     renderFollowState();
     renderRefs();
     renderRun();
+    // The count stepper's spoken labels are translated, so they follow too.
+    renderCount();
     // The stage readout is language-sensitive too; a switch mid-render must not
     // leave "VAE 解码中…" on screen in English mode.
     renderPhase();
@@ -450,7 +471,13 @@
   }
 
   function renderValues() {
-    $("sizeVal").textContent = `${S.width} × ${S.height} · ${S.aspect}`;
+    /* A preset hit is authoritative. Otherwise the label is derived from the
+       numbers on screen, so the header never claims a proportion the two fields
+       contradict. */
+    const shown = ratioLabel(S.width, S.height);
+    $("sizeVal").textContent = shown
+      ? `${S.width} × ${S.height} · ${shown}`
+      : `${S.width} × ${S.height}`;
     if (followsRef()) {
       const last = S.refs[S.refs.length - 1];
       const side = Number($("outRes").value) || 1024;
@@ -472,19 +499,41 @@
     $("alignTip").classList.toggle("warn", !!snapped);
 
     $("sampVal").textContent = `${S.steps} · CFG ${S.cfg.toFixed(1)}`;
-    $("stepsNote").textContent = tr("stepsNote");
+    // Only speak up when the value has left the default; next to a live number,
+    // a permanent "defaults to 40" reads as a description of that number.
+    $("stepsNote").textContent = S.steps === defaultSteps() ? "" : tfx("stepsNote", { n: defaultSteps() });
     $("cfgNote").textContent = S.cfg <= 1 ? tr("cfgOff") : tfx("cfgOn", { v: S.cfg.toFixed(1) });
     $("cfgTip").textContent = S.cfg <= 1 ? tr("cfgTipOff") : tfx("cfgTipOn", { v: S.cfg.toFixed(1) });
     $("outResVal").textContent = `${tr("outputRes")} ${$("outRes").value}`;
     $("outHint").textContent = followsRef() ? tr("followFollow") : tr("followFixed");
     $("refCount").textContent = `${S.refs.length} / ${maxRefs()}`;
+    // The cap is a server value, so the sentence is filled rather than written.
+    $("refsHint").textContent = tfx("refsHint", { n: maxRefs() });
     $("pCount").textContent = tfx("charUnit", { n: $("prompt").value.length });
     $("sendEditBtn").title = tr("sendEdit");
 
     $$("#stepQuick button").forEach((btn) => {
       btn.classList.toggle("on", Number(btn.getAttribute("data-steps")) === S.steps);
     });
+    renderCount();
     renderPins();
+  }
+
+  /* The stepper: one to four pictures per run. The buttons carry the state at
+     the ends of the range (a dimmed button is a reason, not decoration), and a
+     hand-typed value is clamped to the same bound the engine enforces.
+     `min`/`max` already publish the range, so no ARIA restates it. */
+  function renderCount() {
+    const input = $("nImages");
+    const n = clamp(Number(input.value) || 1, 1, maxImages());
+    input.value = n;
+    input.max = maxImages();
+    $("nImagesMinus").disabled = n <= 1;
+    $("nImagesPlus").disabled = n >= maxImages();
+    // Spoken labels follow the language, so they are set here, not in the HTML.
+    $("nImagesMinus").setAttribute("aria-label", tr("nImagesMinus"));
+    $("nImagesPlus").setAttribute("aria-label", tr("nImagesPlus"));
+    $("nImagesRange").textContent = tfx("nImagesRange", { max: maxImages() });
   }
 
   /* Follow-the-reference takes over the output geometry entirely: the engine
@@ -514,7 +563,7 @@
     $("prompt").placeholder = S.mode === "edit" ? tr("promptPhEdit") : tr("promptPhGen");
     $("promptTip").textContent = S.mode === "edit" ? tr("promptTipEdit") : tr("promptTipGen");
     $("sendEditBtn").classList.toggle("hidden", S.mode === "edit");
-    $("genShortcut").innerHTML = `⌘↵ <span>${esc(tr("run"))}</span>`;
+    $("genShortcut").innerHTML = `${runKey()} <span>${esc(tr("run"))}</span>`;
     $("negative").placeholder = defaults().negative_placeholder || tr("negativePh");
   }
 
@@ -604,8 +653,16 @@
   }
 
   function renderPins() {
+    // The pill names the device and the model being worked with. It deliberately
+    // leaves out the weight source: `S.hub` is the *preference*, not where the
+    // weights came from — `resolve_local_hub` on the server silently falls back
+    // to whichever source actually holds a copy, and the job log says so while
+    // the pill would still have shown the preference. It was wrong on exactly
+    // the configuration it claimed to describe. The model sheet behind this pill
+    // reports `local_hub`, the real location, and every history record stores the
+    // resolved value, so nothing is lost by dropping it here.
     $("pillDevice").textContent = ((S.bootstrap && S.bootstrap.device) || {}).device_name || "—";
-    $("pillModel").textContent = `· ${modelLabel(S.modelKey)} · ${hubLabel(S.hub)}`;
+    $("pillModel").textContent = `· ${modelLabel(S.modelKey)}`;
   }
 
   /* ---------- References ---------- */
@@ -847,22 +904,14 @@
     S.detailId = item.id;
     // A record opens on its first frame; the strip switches from there.
     S.detailCurrent = { url: item.image_url || null, index: 0 };
-    const status = STATUS[item.status] || STATUS.succeeded;
-    $("dTitle").textContent = item.mode === "edit" ? tr("detailTitleEdit") : tr("detailTitleGen");
-    $("dStatus").className = `pill ${status[2]}`.trim();
-    $("dStatus").querySelector("use").setAttribute("href", `#${status[1]}`);
-    $("dStatusText").textContent = tr(status[0]);
-    // Duration lives in the spec sheet on the right; repeating it up here was noise.
-    $("dWhen").textContent = [
-      fullTime(item.created_at),
-      item.width && item.height ? `${item.width} × ${item.height}` : "",
-    ].filter(Boolean).join(" · ");
 
     renderDetailMeta(item);
     renderDetailRefs(item);
     showDetailSource(item, 0, null);
     renderDetailFooter(item);
     $("detail").classList.remove("hidden");
+    // Only measurable once the overlay is displayed.
+    wirePromptFolds();
     syncOverlayState();
     renderHistory();
   }
@@ -909,11 +958,28 @@
     }
   }
 
+  /* The spec sheet. Groups run from what the record *is* (when it was made, in
+     which mode, which id) through what it produced to how it was produced. The
+     panel header carries only the word "详情" now, so anything the old top band
+     used to say has to be said here or it is lost — that is why status, mode
+     and the timestamp all live in the first group. */
   function renderDetailMeta(item) {
     const p = item.params || {};
     const vaeRaw = p.vae_tiling;
     const vae = vaeRaw === true || vaeRaw === "true" ? tr("vOn") : vaeRaw === false || vaeRaw === "false" ? tr("vOff") : tr("vAuto");
+    const status = STATUS[item.status] || STATUS.succeeded;
+    const statusText = item.status === "failed" && item.error
+      ? `${tr(status[0])} · ${item.error}`
+      : tr(status[0]);
     $("dMeta").innerHTML =
+      grpHead(tr("grpTask")) +
+      kvCells([
+        [tr("colMode"), item.mode === "edit" ? tr("modeEdit") : tr("modeGen")],
+        [tr("colStatus"), statusText],
+        // The timestamp gets the full width: it is long, and half a 360px
+        // column is not enough for it to stay on one line.
+        [tr("colCreated"), fullTime(item.created_at), true],
+      ]) +
       grpHead(tr("grpImage")) +
       kvCells([
         [tr("colSize"), item.width && item.height ? `${item.width} × ${item.height}` : ""],
@@ -936,10 +1002,55 @@
         [tr("colVae"), vae],
       ]) +
       grpHead(tr("grpPrompt"), { id: "dCopyPrompt", label: tr("copy"), title: tr("copyPrompt") }) +
-      `<div class="dprompt">${esc(item.prompt || "")}</div>` +
-      (item.negative_prompt ? grpHead(tr("negative"), { id: "dCopyNegative", label: tr("copy"), title: tr("copyNegative") }) + `<div class="dprompt">${esc(item.negative_prompt)}</div>` : "");
+      promptBlock(item.prompt, "dPrompt") +
+      (item.negative_prompt
+        ? grpHead(tr("negative"), { id: "dCopyNegative", label: tr("copy"), title: tr("copyNegative") }) +
+          promptBlock(item.negative_prompt, "dNegative")
+        : "");
     $("dCopyPrompt").onclick = () => copyText(item.prompt, tr("grpPrompt"));
     if ($("dCopyNegative")) $("dCopyNegative").onclick = () => copyText(item.negative_prompt, tr("negative"));
+  }
+
+  /* The prompt folds are wired after the overlay is on screen. Measuring while
+     `#detail` is still `display: none` reads every element as zero-sized, so the
+     overflow test would say "fits" for any prompt and the link would never
+     appear. */
+  function wirePromptFolds() {
+    wirePromptFold("dPrompt");
+    wirePromptFold("dNegative");
+  }
+
+  /* A prompt block that folds when it is long. It renders already clamped, so a
+     verbose prompt never flashes its full height first; the toggle is only
+     revealed when the clamped box really is hiding text — a "show all" link
+     under two lines is a control that does nothing, and people learn to ignore
+     those. */
+  function promptBlock(text, id) {
+    return `<div class="dprompt clamped" id="${id}">${esc(text || "")}</div>` +
+      `<button type="button" class="prompt-more hidden" id="${id}More" aria-expanded="false"><span></span>${icon("i-chev", 12)}</button>`;
+  }
+
+  function wirePromptFold(id) {
+    const box = $(id);
+    const more = $(`${id}More`);
+    if (!box || !more) return;
+    // Measured while folded: with the fold expressed as a `max-height`, the box
+    // reports the full content height in `scrollHeight` and the visible height in
+    // `clientHeight`, so comparing them tells us whether anything is hidden. The
+    // tolerance is small on purpose — the heights are exact here, so anything
+    // larger would leave a sliver of a line hidden with no way to reveal it.
+    const overflows = box.scrollHeight > box.clientHeight + 2;
+    more.classList.toggle("hidden", !overflows);
+    box.classList.toggle("clamped", overflows);
+    if (!overflows) return;
+    let open = false;
+    const paint = () => {
+      box.classList.toggle("clamped", !open);
+      more.setAttribute("aria-expanded", open ? "true" : "false");
+      more.querySelector("span").textContent = open ? tr("showLess") : tr("showAll");
+    };
+    more.onclick = () => { open = !open; paint(); };
+    paint();
   }
 
   /* The detail filmstrip. It carries everything the record has: every frame of
@@ -952,30 +1063,54 @@
      between them. Which tile is showing is carried by the `on` class (a
      highlight), so no text label is needed. `aria-current` says the same thing
      to assistive tech. */
+  /* The picture picker in the panel. It carries everything the record has:
+     every frame of the run, then the references it was given — a multi-image
+     generation has just as much to choose from as an edit does.
+
+     Frames come first and references after, in that order, because that is the
+     order they were made. `kind` + `index` say which group a tile belongs to;
+     the two groups number themselves from 1, and a wider gap marks the seam
+     between them. Which tile is showing is carried by the `on` class (a
+     highlight), so no text label is needed. `aria-current` says the same thing
+     to assistive tech.
+
+     References are shown for an edit even when there is only one: it is the
+     other half of what happened, so the frame it produced never appears alone. */
   function renderDetailRefs(item) {
     const outs = item.image_urls || (item.image_url ? [item.image_url] : []);
     const refs = item.ref_urls || [];
-    const show = outs.length + refs.length > 1;
+    const showOuts = outs.length > 1;
+    const showRefs = refs.length > 0;
+    const show = showOuts || showRefs;
     $("dRefs").classList.toggle("hidden", !show);
     if (!show) return;
     const list = $("dRefList");
     list.innerHTML = "";
+    // Each group is named on its own first tile rather than by a heading above
+    // the strip. The strip holds two kinds of picture — what the run made and
+    // what it was given — and a number alone cannot say which is which, so the
+    // first tile of each group carries the word.
     const tiles = outs
-      .map((url, index) => ({ url, kind: "out", index, pos: index, label: String(index + 1) }))
+      .map((url, index) => ({
+        url, kind: "out", index, pos: index, label: String(index + 1),
+        tag: index === 0 ? tr("framesLabel") : null,
+      }))
       .concat(refs.map((url, index) => ({
         url, kind: "ref", index, pos: outs.length + index, label: String(index + 1),
+        tag: index === 0 ? tr("refsLabel") : null,
       })));
     tiles.forEach((tile) => {
       const btn = document.createElement("button");
       btn.type = "button";
-      // The first reference opens a new group; the gap and the hairline come
-      // from CSS rather than an extra element, so every child of the strip
-      // stays a tile.
+      // The first reference opens a new group; the gap comes from CSS rather
+      // than an extra element, so every child of the strip stays a tile.
       btn.className = `reftile${tile.kind === "ref" && tile.index === 0 && outs.length > 0 ? " grp-start" : ""}`;
       btn.dataset.kind = tile.kind;
       btn.dataset.pos = String(tile.pos);
       btn.dataset.index = String(tile.index);
-      btn.innerHTML = `<img src="${esc(tile.url)}" alt="" loading="lazy" /><i>${esc(tile.label)}</i>`;
+      btn.innerHTML = `<img src="${esc(tile.url)}" alt="" loading="lazy" />` +
+        (tile.tag ? `<span class="gtag">${esc(tile.tag)}</span>` : "") +
+        `<i>${esc(tile.label)}</i>`;
       // Describes the tile itself; `aria-current` marks the one on screen.
       btn.setAttribute("aria-label", tile.kind === "out"
         ? tfx("tileFrame", { n: tile.index + 1 })
@@ -1011,12 +1146,11 @@
     const refs = item.ref_urls || [];
     const viewingOutput = refIndex == null;
     const url = viewingOutput ? outs[outIndex || 0] : refs[refIndex];
-    // The footer's download / send-to-edit act on what is on screen, and the
-    // strip highlights it. `detailRefIndex` is null while a frame is showing.
+    // The download button and the strip both follow what is on screen.
+    // `detailRefIndex` is null while a frame is showing.
     if (viewingOutput) {
       S.detailCurrent = { url: url || null, index: outIndex || 0 };
       S.detailRefIndex = null;
-      renderDetailFootNote(item);
     } else {
       S.detailRefIndex = refIndex;
     }
@@ -1027,6 +1161,7 @@
       $("dEmpty").classList.remove("hidden");
       $("dEmptyText").textContent = viewingOutput ? tr("noOutput") : tr("noRefImage");
       syncDetailTiles();
+      renderStageId(item);
       return;
     }
     $("dview").classList.remove("no-image");
@@ -1037,51 +1172,87 @@
     // them with the decoded bitmap's real dimensions once it loads.
     detailZoom.load(item.width || 1024, item.height || 1024, url);
     syncDetailTiles();
+    // The id follows the picture, so it is refreshed wherever the picture is.
+    renderStageId(item);
   }
 
-  /* Which picture the footer acts on. The buttons follow the tile the viewer is
-     showing, so "download" means the one on screen rather than always the
-     first — the whole point of a multi-image run is choosing between them. */
+  /* The id of the picture on the stage.
+
+     Each file of a multi-image run has its own id — `{task}` for the first frame,
+     `{task}_1`, `{task}_2` … for the rest, which is exactly how they are named on
+     disk and in their URLs. Showing the record id instead made four different
+     pictures look like the same one. The id is read from the URL rather than
+     rebuilt from the task id, so it follows whatever the engine actually named
+     the file.
+
+     A reference image has no id of its own: it is stored as
+     `refs/{task}/ref_{nn}.png` and addressed by index, and the upload does not
+     keep the original filename. So the box is hidden rather than filled with a
+     made-up value. */
+  function renderStageId(item) {
+    const box = $("dStageId");
+    const imageId = detailImageId(item);
+    box.classList.toggle("hidden", !imageId);
+    if (imageId) $("dImageId").textContent = imageId;
+  }
+
+  /* The id of the picture currently on screen, or null while a reference is
+     showing. Both kinds are addressed the same way — the id is the last path
+     segment of the URL — so nothing has to second-guess how the engine named
+     things. */
+  function detailImageId(item) {
+    if (S.detailRefIndex != null) return null;
+    const url = (item.image_urls || [])[S.detailCurrent.index || 0] || item.image_url;
+    return url ? decodeURIComponent(String(url).split("/").pop()) : null;
+  }
+
+  /* Which picture the actions act on. The buttons follow the tile the viewer is
+     showing, so "download" means the one on screen rather than always the first
+     — the whole point of a multi-image run is choosing between them. The frame
+     counter that used to say so is gone; the highlighted tile says it. */
   const detailFrame = () => S.detailCurrent;
 
   function renderDetailFooter(item) {
-    // Nothing to download, reuse as an image, or send to edit without a picture.
-    const hasImage = !!item.image_url;
-    const multi = (item.output_count || 1) > 1;
+    // Delete is destructive and acts on the record; the other two act on the
+    // picture. So they get one row with delete pushed to the left edge and a
+    // gap it does not share with the pair.
     $("dFoot").innerHTML =
       `<button type="button" class="btn danger" id="dDelete">${icon("i-trash")}<span class="lbl">${esc(tr("delete"))}</span></button>` +
       `<span class="grow"></span>` +
-      `<span class="dfoot-note${multi ? "" : " hidden"}" id="dFootNote"></span>` +
-      `<button type="button" class="btn" id="dDownload"${hasImage ? "" : " disabled"}>${icon("i-download")}<span class="lbl">${esc(tr("downloadImg"))}</span></button>` +
       `<button type="button" class="btn" id="dReuse">${icon("i-reuse")}<span class="lbl">${esc(tr("reuse"))}</span></button>` +
-      `<button type="button" class="btn" id="dSend"${hasImage ? "" : " disabled"}>${icon("i-send")}<span class="lbl">${esc(tr("sendEdit"))}</span></button>`;
-    if (!hasImage) {
-      ["dDownload", "dSend"].forEach((id) => $(id).classList.add("dim"));
-    }
-    $("dDownload").onclick = () => downloadItem({ ...item, image_url: detailFrame().url || item.image_url });
+      `<button type="button" class="btn" id="dSend">${icon("i-send")}<span class="lbl">${esc(tr("sendEdit"))}</span></button>`;
+    const hasImage = !!item.image_url;
     $("dReuse").onclick = () => { closeDetail(); applyItemParams(item); };
     $("dSend").onclick = () => { if (hasImage) { closeDetail(); sendToEdit(detailFrame().url || item.image_url, item.prompt); } };
     $("dDelete").onclick = () => askDelete(item);
-    renderDetailFootNote(item);
+    // A record with no picture (failed or cancelled) has nothing to send, so the
+    // control is genuinely disabled — not merely dimmed, or it stays focusable
+    // and announces itself as usable.
+    $("dSend").disabled = !hasImage;
+    $("dSend").classList.toggle("dim", !hasImage);
+    // Download sits with the zoom controls under the picture, but it is rendered
+    // here so it keeps following the tile on screen.
+    $("dDownload").onclick = () => downloadItem({ ...item, image_url: detailFrame().url || item.image_url });
+    $("dDownload").disabled = !hasImage;
+    $("dDownload").classList.toggle("dim", !hasImage);
+    $("dDownload").title = tr("downloadImg");
+    $("dDownload").setAttribute("aria-label", tr("downloadImg"));
   }
 
-  /* The footer says which frame the buttons will act on, so a download is never
-     a surprise. It stays quiet for a single-image run, where there is no
-     ambiguity to resolve. */
-  function renderDetailFootNote(item) {
-    const note = $("dFootNote");
-    if (!note) return;
-    const total = item.output_count || 1;
-    if (total < 2) return;
-    note.textContent = tfx("frameOfTotal", { n: detailFrame().index + 1, total });
-  }
-
+  /* Deleting asks first, and the message gets its own row: the record's prompt
+     can be long, and sharing a row with two buttons is how a confirmation ends
+     up unreadable at exactly the moment it matters. */
   function askDelete(item) {
     $("dFoot").innerHTML =
-      `<div class="confirm">${icon("i-alert", 16)}` +
-      `<span>${esc(tr("confirmDeleteAsk"))}<b>${esc((item.prompt || "").slice(0, 34))}…</b></span>` +
-      `<button type="button" class="btn" id="cNo">${esc(tr("confirmDeleteNo"))}</button>` +
-      `<button type="button" class="btn btn-danger-solid" id="cYes">${esc(tr("confirmDeleteYes"))}</button></div>`;
+      `<div class="confirm">` +
+        `<div class="confirm-head">${icon("i-alert", 16)}` +
+          `<span>${esc(tr("confirmDeleteAsk"))}<b>${esc((item.prompt || "").slice(0, 60))}</b></span>` +
+        `</div>` +
+        `<div class="confirm-btns">` +
+          `<button type="button" class="btn" id="cNo">${esc(tr("confirmDeleteNo"))}</button>` +
+          `<button type="button" class="btn btn-danger-solid" id="cYes">${esc(tr("confirmDeleteYes"))}</button>` +
+        `</div>` +
+      `</div>`;
     $("cNo").onclick = () => renderDetailFooter(item);
     $("cYes").onclick = async () => {
       try {
@@ -1283,7 +1454,7 @@
     $("prompt").value = preset.prompt;
     renderValues();
     closePops();
-    toast("ok", tr("toastPresetPicked"), tfx("toastPresetPickedDetail", { title: presetTitle(preset) }));
+    toast("ok", tr("toastPresetPicked"), tfx("toastPresetPickedDetail", { title: presetTitle(preset), key: runKey() }));
   }
 
   function randomPreset() {
@@ -2355,9 +2526,15 @@
 
     $("prompt").addEventListener("input", renderValues);
 
-    /* Presets popover */
-    $("btnPresets").onclick = (event) => {
-      event.stopPropagation();
+    /* Presets popover. Both the toolbar button and the empty-stage card open it,
+       and they share one handler rather than the card forwarding a `.click()` to
+       the button: a forwarded click makes the popover open during the target
+       phase, while the *original* click keeps bubbling to `document`, whose
+       outside-click rule does not recognise the card as a trigger and shuts the
+       popover again — the click looked dead. Sharing the handler also means the
+       card can close an open popover, exactly like the button. */
+    const togglePresets = (event) => {
+      if (event) event.stopPropagation();
       const pop = $("popPresets");
       if (!pop.classList.contains("hidden")) return closePops();
       closePops();
@@ -2371,7 +2548,8 @@
       $("btnPresets").setAttribute("aria-expanded", "true");
       $("btnPresets").classList.add("on");
     };
-    $("startPresets").onclick = () => $("btnPresets").click();
+    $("btnPresets").onclick = togglePresets;
+    $("startPresets").onclick = togglePresets;
     $("presetSearch").addEventListener("input", renderPresets);
     $("presetSearch").onclick = (event) => event.stopPropagation();
     $("presetLucky").onclick = (event) => { event.stopPropagation(); randomPreset(); };
@@ -2492,6 +2670,23 @@
     $("outRes").addEventListener("input", () => {
       S.out = Number($("outRes").value) || 1024;
       renderValues();
+    });
+
+    /* Count stepper. `readonly` keeps the field a value display, so the arrow
+       keys and the two buttons are the ways in — and both clamp identically. */
+    ["nImagesMinus", "nImagesPlus"].forEach((id) => {
+      $(id).onclick = () => {
+        const delta = id === "nImagesPlus" ? 1 : -1;
+        $("nImages").value = clamp((Number($("nImages").value) || 1) + delta, 1, maxImages());
+        renderCount();
+      };
+    });
+    $("nImages").addEventListener("keydown", (event) => {
+      const delta = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 }[event.key];
+      if (delta === undefined) return;
+      event.preventDefault();
+      $("nImages").value = clamp((Number($("nImages").value) || 1) + delta, 1, maxImages());
+      renderCount();
     });
 
     /* Switches */

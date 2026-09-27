@@ -68,13 +68,22 @@
 
 <div class="app" id="app">
   <header class="topbar">
-    <div class="brand"><svg class="brand-mark" aria-hidden="true"><use href="#i-brand"/></svg><b data-i="app">IMGEN</b></div>
+    <!-- The wordmark is the supplied artwork, reversed to the app's ink colour
+         (the original is near-black and would be invisible on this bar). It sits
+         next to the inline SVG mark and keeps `data-i="app"` so the accessible
+         name still follows the language. -->
+    <div class="brand"><svg class="brand-mark" aria-hidden="true"><use href="#i-brand"/></svg><img class="brand-word" src="/brand/imgen-wordmark-dark.png" alt="IMGEN" data-i-alt="app" width="134" height="33" /></div>
     <div class="mode-switch" role="tablist">
       <button type="button" id="modeGen" class="on" role="tab" aria-selected="true"><svg class="ico" width="14" height="14"><use href="#i-image"/></svg><span data-i="generate">生图</span></button>
       <button type="button" id="modeEdit" role="tab" aria-selected="false"><svg class="ico" width="14" height="14"><use href="#i-brush"/></svg><span data-i="edit">改图</span></button>
     </div>
     <div class="grow"></div>
     <button type="button" class="status-pill" id="statusBtn" aria-haspopup="dialog" aria-expanded="false" title="运行环境">
+      <!-- Device, then the model in use. The weight source is deliberately not
+           here: the source shown was the configured preference, not where the
+           weights actually came from — the server silently falls back to
+           whichever source holds a copy. The sheet this opens reports the real
+           location. -->
       <span class="dot" id="pillDot"></span>
       <b id="pillDevice">—</b>
       <span id="pillModel"></span>
@@ -117,7 +126,7 @@
           </button>
           <input id="fileInput" class="sr" type="file" accept="image/*" multiple />
           <div class="ref-grid" id="refGrid"></div>
-          <p class="sub"><span data-i="refsHint">最多 10 张。</span> <b class="ink-text" data-i="refsOrder">顺序就是模型阅读顺序</b></p>
+          <p class="sub"><span id="refsHint">最多 10 张。</span> <b class="ink-text" data-i="refsOrder">顺序就是模型阅读顺序</b></p>
         </section>
 
         <section class="sec">
@@ -175,22 +184,27 @@
             <div class="slider"><input id="cfg" type="range" min="1" max="8" step="0.1" value="1" /><input id="cfgNum" type="number" min="1" max="8" step="0.1" value="1" inputmode="decimal" /></div>
           </div>
           <p class="sub" id="cfgTip"></p>
-          <div class="two">
+          <div class="two split-wide">
             <div class="field">
               <label class="flabel" for="seed"><span data-i="seed">种子</span></label>
               <div class="numwrap"><input id="seed" type="number" inputmode="numeric" /><span class="unit" data-i="seedHint">留空随机</span></div>
             </div>
             <div class="field">
               <label class="flabel" for="nImages"><span data-i="nImages">出图数量</span></label>
-              <div class="numwrap"><input id="nImages" type="number" min="1" max="4" value="1" inputmode="numeric" /></div>
+              <div class="stepper">
+                <button type="button" class="stepbtn" id="nImagesMinus"><svg class="ico" width="12" height="12"><use href="#i-minus"/></svg></button>
+                <input id="nImages" type="number" min="1" max="4" value="1" inputmode="numeric" readonly aria-describedby="nImagesRange" />
+                <button type="button" class="stepbtn" id="nImagesPlus"><svg class="ico" width="12" height="12"><use href="#i-plus"/></svg></button>
+                <span class="sr" id="nImagesRange"></span>
+              </div>
             </div>
           </div>
           <div class="toggle">
-            <span id="kvLabel"><span data-i="kvCache">前缀 KV Cache</span><em class="note-inline" data-i="kvHintShort">改了会改变结果</em></span>
+            <label id="kvLabel" for="kv"><span data-i="kvCache">前缀 KV Cache</span><em class="note-inline" data-i="kvHintShort">改了会改变结果</em></label>
             <button type="button" class="switch" role="switch" aria-checked="true" id="kv" aria-labelledby="kvLabel"></button>
           </div>
           <div class="toggle">
-            <span id="rgbaLabel"><span data-i="transparent">透明底 RGBA</span><em class="note-inline" data-i="rgbaHintShort">输出透明背景</em></span>
+            <label id="rgbaLabel" for="rgba"><span data-i="transparent">透明底 RGBA</span><em class="note-inline" data-i="rgbaHintShort">输出透明背景</em></label>
             <button type="button" class="switch" role="switch" aria-checked="false" id="rgba" aria-labelledby="rgbaLabel"></button>
           </div>
         </section>
@@ -326,45 +340,61 @@
 
   <!-- ===================== 历史详情 ===================== -->
   <div class="detail hidden" id="detail">
-    <div class="dsheet" role="dialog" aria-modal="true" aria-labelledby="dTitle">
-      <header class="dsheet-head">
-        <h3 id="dTitle">—</h3>
-        <span class="pill" id="dStatus"><svg class="ico" width="12" height="12"><use href="#i-check"/></svg><span id="dStatusText"></span></span>
-        <span class="when" id="dWhen"></span>
-        <span class="grow"></span>
-        <button type="button" class="nav-arrow prev" id="dPrev" aria-label="上一条"><svg class="ico" width="15" height="15"><use href="#i-chev"/></svg></button>
-        <button type="button" class="nav-arrow next" id="dNext" aria-label="下一条"><svg class="ico" width="15" height="15"><use href="#i-chev"/></svg></button>
-        <button type="button" class="icon-btn" id="dClose" aria-label="关闭"><svg class="ico" width="16" height="16"><use href="#i-x"/></svg></button>
-      </header>
-      <div class="dsheet-body">
-        <div class="dview" id="dview">
-          <div class="vmain">
-            <div class="viewport" id="dvp">
-              <div class="viewinner" id="dinner">
-                <div class="zoomwrap" id="dwrap"><img id="dimg" alt="" draggable="false" /></div>
-              </div>
-            </div>
-            <div class="dempty hidden" id="dEmpty">
-              <svg class="ico" width="26" height="26"><use href="#i-alert"/></svg>
-              <p id="dEmptyText">—</p>
-            </div>
-            <div class="viewhint" data-i="viewHint"></div>
-            <div class="zoombar">
-              <button type="button" data-dz="out" aria-label="缩小"><svg class="ico" width="14" height="14"><use href="#i-minus"/></svg></button>
-              <span class="pct" id="dzPct">—</span>
-              <button type="button" data-dz="in" aria-label="放大"><svg class="ico" width="14" height="14"><use href="#i-plus"/></svg></button>
-              <span class="sep"></span>
-              <button type="button" data-dz="fit" id="dzFit" class="on"><span data-i="fit">适应</span></button>
-              <button type="button" data-dz="one" aria-label="1:1">1:1</button>
+    <div class="dsheet" role="dialog" aria-modal="true" aria-labelledby="dPanelTitle">
+      <div class="dview" id="dview">
+        <div class="vmain">
+          <div class="viewport" id="dvp">
+            <div class="viewinner" id="dinner">
+              <div class="zoomwrap" id="dwrap"><img id="dimg" alt="" draggable="false" /></div>
             </div>
           </div>
-          <div class="refstrip hidden" id="dRefs">
-            <div class="refstrip-list" id="dRefList"></div>
+          <div class="dempty hidden" id="dEmpty">
+            <svg class="ico" width="26" height="26"><use href="#i-alert"/></svg>
+            <p id="dEmptyText">—</p>
+          </div>
+          <div class="viewhint" data-i="viewHint"></div>
+          <!-- The id of the picture on the stage. Each file of a multi-image run
+               has its own, so switching frames changes it.
+               A reference has no id of its own (it is stored as
+               `refs/{task}/ref_{nn}.png` and addressed by index), so the box is
+               hidden for it rather than filled with a made-up value. -->
+          <div class="stageid" id="dStageId">
+            <i data-i="colId">图片标识</i><b id="dImageId">—</b>
+          </div>
+          <!-- Download lives with the zoom controls: both act on the picture that
+               is on screen, so they belong to the same group. -->
+          <div class="zoombar">
+            <button type="button" data-dz="out" aria-label="缩小"><svg class="ico" width="14" height="14"><use href="#i-minus"/></svg></button>
+            <span class="pct" id="dzPct">—</span>
+            <button type="button" data-dz="in" aria-label="放大"><svg class="ico" width="14" height="14"><use href="#i-plus"/></svg></button>
+            <span class="sep"></span>
+            <button type="button" data-dz="fit" id="dzFit" class="on"><span data-i="fit">适应</span></button>
+            <button type="button" data-dz="one" aria-label="1:1">1:1</button>
+            <span class="sep"></span>
+            <button type="button" id="dDownload"><svg class="ico" width="14" height="14"><use href="#i-download"/></svg></button>
           </div>
         </div>
-        <aside class="dmeta" id="dMeta"></aside>
       </div>
-      <footer class="dsheet-foot" id="dFoot"></footer>
+      <aside class="dpanel">
+        <header class="dpanel-head">
+          <h3 id="dPanelTitle" data-i="detailPanelTitle">详情</h3>
+          <span class="grow"></span>
+          <button type="button" class="nav-arrow prev" id="dPrev" aria-label="上一条"><svg class="ico" width="15" height="15"><use href="#i-chev"/></svg></button>
+          <button type="button" class="nav-arrow next" id="dNext" aria-label="下一条"><svg class="ico" width="15" height="15"><use href="#i-chev"/></svg></button>
+          <button type="button" class="icon-btn" id="dClose" aria-label="关闭"><svg class="ico" width="16" height="16"><use href="#i-x"/></svg></button>
+        </header>
+        <div class="dpanel-body">
+          <!-- Frames and references both live here: they are the pictures this
+               record offers, and the panel is where you choose between them.
+               Each group is named on its first tile rather than by a heading
+               above the strip, so the row of thumbnails is the whole block. -->
+          <div class="dstrip hidden" id="dRefs">
+            <div class="refstrip-list" id="dRefList"></div>
+          </div>
+          <div class="dmeta" id="dMeta"></div>
+        </div>
+        <footer class="dpanel-foot" id="dFoot"></footer>
+      </aside>
     </div>
   </div>
 

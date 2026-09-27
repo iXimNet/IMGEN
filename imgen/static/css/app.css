@@ -13,10 +13,13 @@
   --line: rgba(255, 255, 255, 0.07);
   --line-2: rgba(255, 255, 255, 0.14);
 
-  /* Text, three levels is enough */
+  /* Text, three levels is enough.
+     `faint` sits at 4.97:1 on the panel and 5.28:1 on the input wells. It is
+     genuinely faint, but it is not decoration: step defaults, switch caveats and
+     the seed hint all live here, so it has to clear 4.5:1 to stay readable. */
   --ink: #ece9e3;
   --ink-dim: #9a968e;
-  --ink-faint: #6b6862;
+  --ink-faint: #8b877e;
 
   /* Safelight */
   --accent: #f0a043;
@@ -69,7 +72,7 @@ img { max-width: 100%; display: block; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .grow { flex: 1; min-width: 0; }
 .ink-text { color: var(--ink); font-weight: 500; }
-kbd, .kb { font-family: var(--mono); font-size: 11px; }
+kbd, .kb { font-family: var(--mono); font-size: 11px; letter-spacing: 0.02em; }
 kbd { border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: 4px; padding: 1px 4px; }
 
 /* ==========================================================================
@@ -86,26 +89,48 @@ kbd { border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: 
 /* The mark is an inline SVG (see #i-brand in the sprite): an aperture ring
    around a safelight core. It carries its own fills, so no `color` needed. */
 .brand-mark { width: 22px; height: 22px; border-radius: 6px; flex: none; display: block; }
-.brand b { font-size: 14px; font-weight: 600; letter-spacing: 0.01em; }
+/* The wordmark is artwork, reversed to --ink for this bar. Its intrinsic size is
+   134x33 (about 4x the 22px mark's cap height); `height` drives the layout so the
+   aspect ratio stays exact whatever the box. */
+.brand-word { height: 15px; width: auto; flex: none; display: block; }
 
 .mode-switch { display: flex; gap: 2px; padding: 3px; background: var(--bg); border: 1px solid var(--line); border-radius: 9px; flex: none; }
 .mode-switch button { display: flex; align-items: center; gap: 6px; padding: 6px 13px; border-radius: 7px; font-size: 13px; color: var(--ink-dim); white-space: nowrap; }
 .mode-switch button:hover { color: var(--ink); }
 .mode-switch button.on { background: var(--sel); color: var(--ink); font-weight: 500; box-shadow: inset 0 0 0 1px var(--sel-line); }
 
+/* The pill names the device, the model and the weight hub. All three vary by
+   machine, so a fixed cap guarantees truncation on some configuration — a
+   340px cap cut "ModelScope 魔搭" down on this very box. It sizes to its content
+   instead and only shrinks when the bar runs out of room; the ellipsis on the
+   spans below is the fallback, not the default. `.grow` absorbs the slack on
+   the left, so a wider pill never pushes the icon cluster. */
 .status-pill {
-  display: flex; align-items: center; gap: 7px; padding: 6px 11px; flex: none;
+  display: flex; align-items: center; gap: 7px; padding: 6px 11px; flex: 0 1 auto;
+  /* The floor keeps the control legible when the bar is tight: it degrades to
+     "dot + chevron" rather than a sliver narrower than its own padding — at 520px
+     it was being squeezed to 34px and the chevron sat outside the rounded border,
+     which reads as a broken control. This is the furniture width (dot, both gaps,
+     chevron, padding, border) with the text free to reach zero; without a floor a
+     flex item refuses to shrink at all and would push the icons out of the bar. */
+  min-width: 56px;
+  /* Without this a squeezed pill spills its own contents past the rounded edge:
+     a flex container does not clip by default. */
+  overflow: hidden;
   border: 1px solid var(--line); border-radius: 999px; background: var(--bg);
-  font-size: 12px; color: var(--ink-dim); max-width: 340px;
+  font-size: 12px; color: var(--ink-dim);
 }
 .status-pill:hover { border-color: var(--line-2); }
 .status-pill.on { background: var(--sel); box-shadow: inset 0 0 0 1px var(--sel-line); }
 .status-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); flex: none; }
 .status-pill .dot.warn { background: var(--accent); }
 .status-pill .dot.err { background: var(--danger); }
-.status-pill b { color: var(--ink); font-weight: 500; white-space: nowrap; }
+/* Both halves shrink and both ellipsise. Squeezed far enough either one would
+   otherwise be cut mid-word with no ellipsis — a `<b>` with `nowrap` and default
+   `overflow` just gets guillotined by the pill's rounded clip. */
+.status-pill b { color: var(--ink); font-weight: 500; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .status-pill > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.status-pill .chev { opacity: 0.65; }
+.status-pill .chev { opacity: 0.65; flex: none; }
 
 .icon-btn { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: var(--ink-dim); flex: none; }
 .icon-btn:hover { background: var(--sel); color: var(--ink); }
@@ -153,7 +178,7 @@ textarea:focus, input:focus, select:focus {
   border-color: rgba(240, 160, 67, 0.55); box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .textfoot {
-  position: absolute; left: 12px; right: 12px; bottom: 8px; display: flex; align-items: center; gap: 8px;
+  position: absolute; left: 12px; right: 22px; bottom: 8px; display: flex; align-items: center; gap: 8px;
   font-family: var(--mono); font-size: 11.5px; color: var(--ink-faint); pointer-events: none;
 }
 .textfoot .kb { margin-left: auto; }
@@ -205,6 +230,19 @@ textarea:focus, input:focus, select:focus {
 .flabel-note { margin-left: auto; font-family: var(--mono); font-size: 11.5px; color: var(--ink-faint); }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .two .field + .field { margin-top: 0; }
+/* `seed` may hold a full 10-digit seed and is typed by hand; `count` only ever
+   holds 1–4 and is stepped. So the row is deliberately not an even split: the
+   seed gets the room, the count takes what its widest value plus two buttons
+   actually need, and its label is right-aligned over its own column. */
+.two.split-wide { grid-template-columns: minmax(0, 1fr) 118px; }
+.two.split-wide .field + .field .flabel { justify-content: flex-end; }
+/* A field group reads as one unit; separate it from its neighbours, not from
+   itself. These are the adjacencies `.field + .field` never covered. */
+.quick + .field { margin-top: 11px; }
+.sub + .two { margin-top: 11px; }
+.field + .two { margin-top: 11px; }
+.ratios + .two { margin-top: 11px; }
+.two + .toggle { margin-top: 4px; }
 
 input[type="number"], input[type="text"], input[type="password"], input[type="search"], select {
   width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-sm);
@@ -218,7 +256,29 @@ input[type="number"] { -moz-appearance: textfield; }
 .numwrap .unit { position: absolute; right: 11px; top: 50%; transform: translateY(-50%); font-family: var(--mono); font-size: 11.5px; color: var(--ink-faint); pointer-events: none; }
 .numwrap input:placeholder-shown + .unit { color: var(--ink-faint); }
 
-input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; }
+/* Stepper: a bounded count is stepped, not typed. 1–4 has no use for a wide
+   field, so the two buttons take that space instead — a bigger target than a
+   native spinner, and it keeps the count at the column edge where the eye
+   expects a number that only goes up and down. */
+.stepper { display: grid; grid-template-columns: 34px minmax(0, 1fr) 34px; align-items: stretch; }
+.stepper input {
+  text-align: center; font-family: var(--mono); font-size: 13px;
+  border-radius: 0; border-left: 0; border-right: 0; padding-left: 4px; padding-right: 4px;
+  background: var(--bg);
+}
+.stepper input:focus { position: relative; z-index: 1; }
+.stepbtn {
+  display: grid; place-items: center; color: var(--ink-dim);
+  background: var(--surface-2); border: 1px solid var(--line);
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+.stepbtn:first-child { border-radius: var(--r-sm) 0 0 var(--r-sm); }
+.stepbtn:last-of-type { border-radius: 0 var(--r-sm) var(--r-sm) 0; }
+.stepbtn:hover:not(:disabled) { color: var(--ink); border-color: var(--line-2); }
+/* At the ends the control says so with weight, not just a dim colour. */
+.stepbtn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; margin: 0; }
 .slider { display: grid; grid-template-columns: minmax(0, 1fr) 62px; gap: 10px; align-items: center; }
 .quick { display: flex; gap: 6px; margin-top: 8px; }
 .quick button { flex: 1; padding: 6px 4px; border: 1px solid var(--line); border-radius: 7px; font-size: 11.5px; color: var(--ink-dim); background: var(--bg); }
@@ -227,9 +287,16 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; }
 
 /* Segmented control */
 .seg { display: flex; gap: 2px; padding: 3px; background: var(--bg); border: 1px solid var(--line); border-radius: 9px; }
-.seg button { flex: 1; padding: 7px 10px; border-radius: 7px; font-size: 12.5px; color: var(--ink-dim); text-align: center; }
+/* Height follows the content. An earlier version reserved a fixed 15px row for a
+   subtitle so two options would align even when only one had one; no segment
+   carries a subtitle any more, so that row was pure padding — and it made these
+   controls taller than the buttons beside them. If a subtitle returns, the row
+   grows by itself. */
+.seg button { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 6px 10px; border-radius: 7px; font-size: 12.5px; color: var(--ink-dim); text-align: center; }
 .seg button:hover { color: var(--ink); }
 .seg button.on { background: var(--sel); color: var(--ink); font-weight: 500; box-shadow: inset 0 0 0 1px var(--sel-line); }
+/* The note row is reserved whether or not an option has one, so the labels of
+   both options sit on the same line instead of jumping as the selection moves. */
 .seg button small { display: block; font-size: 10.5px; font-weight: 400; color: var(--ink-faint); margin-top: 2px; }
 .seg button.on small { color: var(--ink-dim); }
 /* Disabled by "follow the reference aspect": the value is ignored, so say so
@@ -257,9 +324,11 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; }
 .is-disabled .flabel-note { opacity: 0.8; }
 .numwrap input:disabled, .field input:disabled { color: var(--ink-faint); cursor: not-allowed; }
 
-/* Switch: brightness, not the accent */
-.toggle { display: flex; align-items: center; gap: 12px; padding: 8px 0; font-size: 13.5px; }
-.toggle > span:first-child { flex: 1; min-width: 0; }
+/* Switch: brightness, not the accent. The whole row is the target — the label
+   is what people aim at, so it is a <label> bound to the switch and the row
+   inherits the pointer. */
+.toggle { display: flex; align-items: center; gap: 12px; padding: 8px 0; font-size: 13.5px; cursor: pointer; }
+.toggle > span:first-child, .toggle > label:first-child { flex: 1; min-width: 0; }
 .note-inline { display: block; font-style: normal; font-size: 11.5px; color: var(--ink-faint); margin-top: 2px; }
 .switch { width: 38px; height: 22px; border-radius: 99px; background: #2a2d31; position: relative; flex: none; transition: background 0.16s ease; }
 .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #7e7c77; transition: left 0.16s ease, background 0.16s ease; }
@@ -289,8 +358,17 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; }
 .view { min-height: 0; min-width: 0; position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 .viewport { overflow: auto; padding: 18px; min-height: 0; min-width: 0; overscroll-behavior: contain; scrollbar-width: none; }
 .viewport::-webkit-scrollbar { width: 0; height: 0; }
-.view.pannable .viewport { cursor: grab; }
-.view.panning .viewport { cursor: grabbing; }
+/* Drag-to-pan. Both hosts are covered: the stage viewer is `.view`, the detail
+   overlay's viewer is `.dview` — the detail one used to be missing, so a
+   pannable picture there gave no hint that it could be dragged. */
+.view.pannable .viewport, .dview.pannable .viewport { cursor: grab; }
+.view.panning .viewport, .dview.panning .viewport { cursor: grabbing; }
+/* The wrapper is inside the viewport, and the picture fills it, so the cursor
+   has to be repeated here or hovering the image itself falls back to default. */
+.view.pannable .zoomwrap, .dview.pannable .zoomwrap { cursor: grab; }
+.view.panning .zoomwrap, .dview.panning .zoomwrap { cursor: grabbing; }
+.view.pannable img, .dview.pannable img { cursor: grab; }
+.view.panning img, .dview.panning img { cursor: grabbing; }
 /* Fit mode must not show scrollbars. `max-content` on the inner wrapper is what
    lets a zoomed image scroll back to its top-left, but at fit size the rounded
    wrapper size leaves a few pixels of overflow. So: scrollbar chrome only
@@ -340,9 +418,25 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; }
 .view:focus-within .zoombar { opacity: 1; }
 /* No picture: nothing to zoom, so the bar never appears. */
 .vmain.no-image .zoombar { display: none; }
+/* The ids of what is on the stage, parked in its corner. It shares the zoom
+   bar's rule exactly — hidden until the pointer is in the viewer, permanently
+   visible on a device with no hover — because it is the same kind of thing: a
+   reference detail you look up rather than read on every open. */
+/* The id is selectable text: it is the one value here a user may need to copy
+   (into a bug report, a filename, a search). It takes pointer events only while
+   it is visible — an always-active box would silently swallow a drag started in
+   the top-left corner of the picture, which is exactly where the id sits. */
+.dview .stageid { position: absolute; left: 10px; top: 10px; z-index: 2; max-width: calc(100% - 20px); padding: 4px 9px; border-radius: 6px; background: rgba(0, 0, 0, 0.62); opacity: 0; transition: opacity 0.16s ease; pointer-events: none; display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.dview .vmain:hover .stageid,
+.dview .vmain:focus-within .stageid { opacity: 1; pointer-events: auto; }
+.vmain.no-image .stageid { display: none; }
+.stageid i { flex: none; font-style: normal; font-size: 10px; color: var(--ink-faint); user-select: none; }
+.stageid b { font-weight: 400; font-family: var(--mono); font-size: 11px; color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: text; user-select: text; -webkit-user-select: text; }
+.stageid b::selection { background: var(--accent); color: #12151a; }
 /* Coarse pointers have no hover — keep the controls permanently visible. */
 @media (hover: none) {
   .dview .zoombar, .view .zoombar { opacity: 1; }
+  .dview .stageid { opacity: 1; }
 }
 .zoombar button { min-width: 28px; height: 26px; padding: 0 7px; border-radius: 6px; display: grid; place-items: center; color: var(--ink-dim); font-size: 12px; }
 .zoombar button:hover { background: var(--sel); color: var(--ink); }
@@ -451,7 +545,10 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; }
 .pcard { text-align: left; padding: 9px 11px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-2); }
 .pcard:hover { border-color: var(--sel-line); background: #22262b; }
 .pcard b { display: block; font-size: 13px; font-weight: 500; margin-bottom: 3px; }
-.pcard span { display: -webkit-box; font-size: 12px; color: var(--ink-dim); line-height: 1.5; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+/* Two-line summary. Same engine limitation as `.dprompt`: `-webkit-line-clamp`
+   does nothing here (`display: -webkit-box` is normalised to `flow-root`), so the
+   limit is a height, not a clamp. */
+.pcard span { display: block; font-size: 12px; color: var(--ink-dim); line-height: 1.5; max-height: 3em; overflow: hidden; }
 .empty-row { font-size: 12px; color: var(--ink-dim); line-height: 1.6; padding: 14px 4px; margin: 0; }
 
 .grp { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.08em; color: var(--ink-faint); margin: 4px 0 0; text-transform: uppercase; }
@@ -494,17 +591,26 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; }
    History detail overlay
    ========================================================================== */
 .detail { position: absolute; inset: 0; z-index: 32; display: grid; place-items: center; padding: 20px; background: rgba(6, 7, 8, 0.8); }
-/* Width follows the same rule as height: fill the overlay, capped only by the
-   viewport so the picture gets the room. */
-.dsheet { width: 100%; max-width: min(1800px, 100%); height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--surface); border: 1px solid var(--line-2); border-radius: 14px; box-shadow: 0 34px 80px rgba(0, 0, 0, 0.66); overflow: hidden; }
-.dsheet-head { display: flex; align-items: center; gap: 11px; padding: 13px 12px 12px 18px; border-bottom: 1px solid var(--line); min-width: 0; }
-.dsheet-head h3 { font-size: 17px; font-weight: 600; margin: 0; flex: none; }
-.dsheet-head .when { font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.dsheet-body { display: grid; grid-template-columns: minmax(0, 1fr) 348px; min-height: 0; min-width: 0; }
+/* Two columns and nothing else: the picture on the left, everything about the
+   record on the right. There is no top or bottom band spanning both — those
+   used to frame the picture from above and below and cost it height it could
+   not get back, because the picture here is height-bound (the stage is far
+   wider than the picture needs). */
+.dsheet { width: 100%; max-width: min(1800px, 100%); height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 360px; background: var(--surface); border: 1px solid var(--line-2); border-radius: 14px; box-shadow: 0 34px 80px rgba(0, 0, 0, 0.66); overflow: hidden; }
 .dview { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #0c0e10; border-right: 1px solid var(--line); }
 .vmain { flex: 1; min-height: 0; min-width: 0; position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
-.vmain > .viewport { grid-area: 1 / 1; padding: 22px; }
-.dmeta { min-width: 0; min-height: 0; overflow: auto; padding: 16px 18px 8px; }
+.vmain > .viewport { grid-area: 1 / 1; padding: 16px; }
+/* The panel owns its own header, scroller and foot, so it can stay put while
+   the metadata scrolls. */
+.dpanel { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; background: var(--surface); }
+.dpanel-head { display: flex; align-items: center; gap: 4px; padding: 10px 10px 10px 18px; border-bottom: 1px solid var(--line); min-width: 0; }
+.dpanel-head h3 { font-size: 15px; font-weight: 600; margin: 0; flex: none; letter-spacing: 0.01em; }
+.dpanel-body { min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 14px 18px 16px; }
+.dpanel-foot { display: flex; align-items: center; gap: 8px; padding: 11px 16px; border-top: 1px solid var(--line); background: rgba(0, 0, 0, 0.16); }
+/* Delete stands apart from the two actions that act on the picture: it is the
+   destructive one, so it gets the left edge and a gap it does not share. */
+.dpanel-foot .btn.danger { margin-right: 12px; }
+.dpanel-foot .grow { flex: 1; }
 /* A record with no picture (failed / cancelled): say so instead of showing a
    stale image from the previous record. */
 .dempty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; text-align: center; pointer-events: none; }
@@ -512,17 +618,54 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; }
 .dempty p { margin: 0; font-size: 13px; color: var(--ink-dim); max-width: 320px; line-height: 1.6; }
 .dmeta .grp { margin: 18px 0 8px; }
 .dmeta .grp:first-child { margin-top: 0; }
-.dprompt { margin-top: 2px; padding: 11px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 9px; font-size: 12.5px; line-height: 1.62; white-space: pre-wrap; user-select: text; overflow-wrap: anywhere; }
-.dsheet-foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); background: rgba(0, 0, 0, 0.16); }
+/* The prompt block. A long prompt is folded to a few lines with a link to open
+   it, so one verbose record cannot push every other field off the panel.
+   The fold is a `max-height`, not `-webkit-line-clamp`: this engine normalises
+   `display: -webkit-box` to `flow-root` and does not implement the standard
+   `line-clamp` either, so a clamp silently does nothing. `--clamp` is a line
+   count, and the box height is derived from the line box so the cut always lands
+   on a line boundary; the last line fades into the panel instead of being sliced
+   through the middle of the glyphs. */
+.dprompt { --line: 1.6; --clamp: 5; position: relative; margin-top: 2px; padding: 10px 11px; background: var(--bg); border: 1px solid var(--line); border-radius: 9px; font-size: 12.5px; line-height: var(--line); white-space: pre-wrap; user-select: text; overflow-wrap: anywhere; }
+/* The fold is a height, and the bottom padding is part of that height — but it
+   is transparent, so a fifth line shows through it. Padding-bottom is therefore
+   dropped while folded: the box ends exactly at the last visible line, and the
+   fade below covers the glyphs that continue underneath. */
+.dprompt.clamped { max-height: calc(1em * var(--line) * var(--clamp) + 12px); padding-bottom: 0; overflow: hidden; }
+.dprompt.clamped::after { content: ""; position: absolute; left: 1px; right: 1px; bottom: 1px; height: 22px; border-radius: 0 0 8px 8px; background: linear-gradient(rgba(15, 17, 19, 0), var(--bg) 88%); pointer-events: none; }
+/* Sits under the prompt block, aligned with its right edge. The button is a
+   block that fills the column and pushes its own content right — `justify-content`
+   alone does nothing here, because a button otherwise shrinks to fit its text,
+   so there would be no free space inside it to distribute. */
+.prompt-more { display: flex; align-items: center; justify-content: flex-end; gap: 4px; width: 100%; margin-top: 6px; padding: 2px 0; font-size: 11.5px; color: var(--accent); }
+.prompt-more:hover { text-decoration: underline; }
+.prompt-more .ico { transition: transform 0.14s ease; }
+.prompt-more[aria-expanded="true"] .ico { transform: rotate(180deg); }
 .nav-arrow { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; color: var(--ink-dim); }
 .nav-arrow:hover { background: var(--sel); color: var(--ink); }
 .nav-arrow.prev .ico { transform: rotate(90deg); }
 .nav-arrow.next .ico { transform: rotate(-90deg); }
 
-.refstrip { display: flex; gap: 9px; align-items: center; padding: 11px 14px; border-top: 1px solid var(--line); background: var(--surface); min-width: 0; }
-.refstrip-list { display: flex; gap: 7px; overflow-x: auto; min-width: 0; padding: 3px 0 3px; }
-.reftile { position: relative; width: 52px; height: 52px; flex: none; border-radius: 7px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--line); opacity: 0.55; transition: opacity 0.14s ease, box-shadow 0.14s ease, transform 0.14s ease; }
-.reftile img { width: 100%; height: 100%; object-fit: cover; }
+/* The picture picker: frames first, then references. It lives in the panel, so
+   it wraps into a grid instead of scrolling sideways — a single row would hide
+   half the pictures in a 360px column. Its bottom margin matches the gap every
+   other group leaves above the next one (`.dmeta .grp`), so the strip does not
+   sit tighter against 任务 than the groups do against each other. */
+.dstrip { margin-bottom: 18px; }
+/* The strip reserves room above the tiles for the group labels, so a label never
+   overlaps the picture it names. `padding-top` on the list is what creates the
+   space — the label sits in it, not on the thumbnail. */
+.refstrip-list { display: flex; flex-wrap: wrap; gap: 7px; min-width: 0; padding-top: 15px; }
+.reftile { position: relative; width: 44px; height: 44px; flex: none; border-radius: 7px; box-shadow: inset 0 0 0 1px var(--line); opacity: 0.55; transition: opacity 0.14s ease, box-shadow 0.14s ease, transform 0.14s ease; }
+.reftile img { width: 100%; height: 100%; object-fit: cover; border-radius: 7px; }
+/* Names the group on its first tile. A number alone cannot say whether a
+   thumbnail is something the run made or something it was given. It sits ABOVE
+   the tile, in the list's reserved padding, so the picture stays unobstructed —
+   it used to be pinned inside the tile and covered the top of the image.
+   Left-aligned with the tile it names, not centred over it: the label is the
+   group's own caption, so it should read from the same left edge as the first
+   thumbnail under it. */
+.reftile .gtag { position: absolute; left: 0; bottom: 100%; margin-bottom: 3px; font-family: var(--sans); font-size: 9.5px; font-style: normal; line-height: 1.2; white-space: nowrap; color: var(--ink-dim); }
 .reftile:hover { opacity: 0.85; box-shadow: inset 0 0 0 1.5px var(--sel-line); }
 /* The tile currently on screen: full brightness, a light frame, and a lift.
    Everything else stays dimmed, so the current one reads at a glance. */
@@ -537,8 +680,16 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; }
 .reftile.grp-start { margin-left: 12px; }
 /* A run that made several pictures marks the thumbnail with how many. */
 .thcount { position: absolute; right: 3px; bottom: 3px; font-family: var(--mono); font-size: 9.5px; font-style: normal; color: var(--ink); background: rgba(0, 0, 0, 0.72); padding: 2px 4px; border-radius: 4px; }
-/* Which frame the detail footer's download / send-to-edit will act on. */
-.dfoot-note { font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim); margin-right: 2px; }
+
+/* Delete confirmation. The message gets its own row so a long prompt cannot
+   squeeze the two buttons to the edge; the buttons sit under it, right-aligned
+   like every other action in the panel. */
+.confirm { display: grid; gap: 10px; width: 100%; padding: 11px 12px; border: 1px solid rgba(224, 115, 106, 0.4); background: rgba(224, 115, 106, 0.08); border-radius: 9px; font-size: 12.5px; }
+.confirm-head { display: flex; align-items: flex-start; gap: 9px; }
+.confirm-head .ico { color: var(--danger); flex: none; margin-top: 1px; }
+.confirm-head span { flex: 1; min-width: 0; line-height: 1.55; overflow-wrap: anywhere; }
+.confirm-head b { display: block; margin-top: 4px; font-weight: 500; color: var(--ink); }
+.confirm-btns { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 
 /* ==========================================================================
    Sheets: model & download, first run
@@ -567,10 +718,17 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; }
    cells sit flush with each other, and row height follows the content instead
    of the old 52px min-height. The settings sheet keeps the fully bordered
    variant above. */
-.kv.flat { gap: 0; background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; overflow: hidden; column-gap: 14px; row-gap: 0; }
-.kv.flat > div { background: none; padding: 5px 12px; min-height: 0; gap: 1px; }
-.kv.flat .k { font-size: 10.5px; }
-.kv.flat .v { font-size: 12.5px; }
+/* The detail panel keeps the rounded frame but drops the internal gridlines,
+   and its spacing follows one rule, tightest first:
+       label → value  <  row → row  <  row → card edge
+   So the edge is the roomiest gap in the card, a row is clearly separated from
+   the next, and a label stays glued to the value it names. Padding lives on the
+   card rather than on each cell — that is what makes the edge gap independent
+   of the row gap. The settings sheet keeps the bordered `.kv` variant above. */
+.kv.flat { gap: 0; padding: 10px 0; background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; overflow: hidden; column-gap: 14px; row-gap: 6px; }
+.kv.flat > div { background: none; padding: 0 12px; min-height: 0; gap: 2px; }
+.kv.flat .k { font-size: 10.5px; line-height: 1.25; }
+.kv.flat .v { font-size: 12.5px; line-height: 1.35; }
 .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; font-size: 11.5px; background: rgba(111, 191, 154, 0.14); color: var(--ok); white-space: nowrap; flex: none; }
 .pill.is-err { background: rgba(224, 115, 106, 0.14); color: var(--danger); }
 .pill.is-warn { background: rgba(240, 160, 67, 0.14); color: var(--accent); }
@@ -592,10 +750,9 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; }
 .dir-row .d-x:hover { background: var(--sel); color: var(--danger); }
 .dir-add { display: flex; gap: 6px; margin-top: 8px; }
 .dir-add input { flex: 1; min-width: 0; }
-
-.confirm { display: flex; align-items: center; gap: 10px; flex: 1; padding: 10px 12px; border: 1px solid rgba(224, 115, 106, 0.4); background: rgba(224, 115, 106, 0.08); border-radius: 9px; font-size: 12.5px; }
-.confirm .ico { color: var(--danger); flex: none; }
-.confirm span { flex: 1; min-width: 0; }
+/* The `.confirm` layout lives with the detail panel (search for `.confirm-head`):
+   this file has one definition per component, and a second one here silently
+   overrode the row/stack structure. */
 
 /* ==========================================================================
    Toasts
@@ -637,6 +794,11 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; }
   .starts { grid-template-columns: 1fr; gap: 6px; }
   .start-card { display: flex; align-items: center; gap: 10px; justify-content: flex-start; text-align: left; padding: 10px 12px; }
   .toolbar { display: none; }
+  /* The bottom bar carries its own 生图/改图 switch (it is the only one near the
+     run button), so the top bar's copy is a duplicate down here — 166px of the
+     narrowest budget spent saying the same thing twice. It also cost the status
+     pill its text: the duplicate was the reason the pill had to shrink at all. */
+  .topbar .mode-switch { display: none; }
   .mobilebar {
     display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 8px;
     padding: 0 12px; background: var(--surface); border-top: 1px solid var(--line); z-index: 16;
@@ -660,17 +822,18 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; }
   .toast { max-width: none; width: 100%; }
   .pop.side-right { border-top-left-radius: var(--r); }
   .pop.side-right::before { display: none; }
-  /* Detail overlay goes full-bleed: picture on top, settings below */
+  /* Detail overlay goes full-bleed: picture on top, panel below. The panel keeps
+     its own header and foot, so it stays usable as a scrolling column. */
   .detail { padding: 0; }
-  .dsheet { max-width: none; height: 100%; border-radius: 0; border: 0; box-shadow: none; }
-  .dsheet-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .dsheet { max-width: none; height: 100%; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; border-radius: 0; border: 0; box-shadow: none; }
   .dview { border-right: 0; border-bottom: 1px solid var(--line); }
-  .dmeta { max-height: 34vh; }
-  .dsheet-head h3 { font-size: 15px; }
-  .dsheet-head .when { display: none; }
-  .dsheet-foot { padding: 10px 12px; }
-  .dsheet-foot .lbl { display: none; }
-  .dsheet-foot .btn { padding: 9px 11px; }
+  .dpanel { max-height: 46vh; }
+  .dpanel-body { padding: 12px 14px 14px; }
+  .dpanel-head { padding: 9px 8px 9px 14px; }
+  .dpanel-foot { padding: 9px 12px; }
+  .dpanel-foot .lbl { display: none; }
+  .dpanel-foot .btn { padding: 9px 11px; }
+  .dpanel-foot .btn.danger { margin-right: 8px; }
   .viewhint { display: none; }
   .overlay { padding: 0; }
   .sheet { max-width: none; height: 100%; border-radius: 0; border: 0; box-shadow: none; }
@@ -683,7 +846,9 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; }
 }
 @media (max-width: 460px) {
   .status-pill b { display: none; }
-  .brand b { display: none; }
+  /* Narrowest phones keep the mark alone: the wordmark is artwork and cannot be
+     abbreviated, so it is dropped rather than squeezed. */
+  .brand-word { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

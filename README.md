@@ -1,4 +1,4 @@
-# IMGEN
+# <img src="imgen/static/brand/imgen-wordmark.png" alt="IMGEN" width="360" height="88">
 
 Local visual studio for **Qwen-Image-2.1** — generate from text, edit with up to **10 reference images**, and keep every run in a searchable history.
 

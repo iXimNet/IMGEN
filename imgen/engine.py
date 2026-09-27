@@ -15,6 +15,7 @@ from .constants import (
     DEFAULT_KV_CACHE,
     DEFAULT_SCALE,
     DEFAULT_STEPS,
+    MAX_NUM_IMAGES,
     MAX_REFERENCE_IMAGES,
     MODELS,
 )
@@ -367,7 +368,7 @@ class Engine:
                 if request.get("use_kv_cache") is not None
                 else DEFAULT_KV_CACHE
             )
-            n_images = max(1, min(4, int(request.get("num_images") or 1)))
+            n_images = max(1, min(MAX_NUM_IMAGES, int(request.get("num_images") or 1)))
             enable_tiling = resolve_vae_tiling(request.get("vae_tiling"))
 
             if self.demo:

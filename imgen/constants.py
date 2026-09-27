@@ -20,6 +20,9 @@ DEFAULT_KV_CACHE = True
 DEFAULT_OUTPUT_RESOLUTION_2K = 2048
 DEFAULT_OUTPUT_RESOLUTION_1K = 1024
 DEFAULT_NUM_IMAGES = 1
+# The engine clamps a run to this many pictures; the panel's stepper shows the
+# same bound, so the two cannot drift apart.
+MAX_NUM_IMAGES = 4
 
 # Image21-INT8 errata (2026-09-24): its earlier general 2048px recommendation was
 # withdrawn in favour of a 1024px area scale, so 1K is what the studio opens on.
@@ -155,8 +158,8 @@ RESOLUTION_SCALES = {
         "key": "1k",
         "label_zh": "1K",
         "label_en": "1K",
-        "note_zh": "更省显存",
-        "note_en": "lower VRAM",
+        "note_zh": "",
+        "note_en": "",
         "output_resolution": DEFAULT_OUTPUT_RESOLUTION_1K,
         "table": ASPECT_RATIOS_1K,
     },

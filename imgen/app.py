@@ -22,8 +22,11 @@ from . import __version__
 from .config import ConfigStore
 from .constants import (
     APP_NAME,
+    DEFAULT_CFG,
     DEFAULT_SCALE,
+    DEFAULT_STEPS,
     HUBS,
+    MAX_NUM_IMAGES,
     MAX_REFERENCE_IMAGES,
     MAX_UPLOAD_BYTES,
     MODELS,
@@ -215,6 +218,11 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
             "defaults": {
                 "negative_placeholder": NEGATIVE_PROMPT_PLACEHOLDER,
                 "max_reference_images": MAX_REFERENCE_IMAGES,
+                # The panel labels these as defaults, so it reads them from the
+                # engine's own constants rather than repeating the numbers.
+                "steps": DEFAULT_STEPS,
+                "cfg": DEFAULT_CFG,
+                "max_images": MAX_NUM_IMAGES,
             },
         }
 

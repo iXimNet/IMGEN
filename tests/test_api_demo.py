@@ -432,6 +432,171 @@ def test_brand_mark_and_favicon_share_one_symbol(client):
     assert "brand-mark::after" not in client.get("/css/app.css").text
 
 
+def test_status_pill_is_not_width_capped(client):
+    """The pill must size to its content, not to a number someone guessed.
+
+    It names three things that vary per machine — device, model, weight hub — and
+    a fixed cap therefore guarantees truncation on some configuration. A 340px cap
+    cut "ModelScope 魔搭" down to "Model…" on the machine this was written on, and
+    a machine with a longer card name loses more.
+
+    The cap is replaced by content sizing plus `min-width`, so the pill only gives
+    ground when the bar genuinely runs out of room, and by `overflow: hidden` so
+    that when it does, the contents are clipped to the rounded edge instead of
+    spilling past it.
+    """
+    css = client.get("/css/app.css").text
+    pill = css[css.index(".status-pill {"):]
+    pill = pill[: pill.index("}")]
+
+    # No fixed ceiling: that is the actual defect.
+    assert "max-width" not in pill, "a max-width cap is what truncated the text"
+    # A floor so a squeezed pill still shows its dot and chevron, and clipping so
+    # nothing escapes the rounded border.
+    assert "min-width: 56px" in pill
+    assert "overflow: hidden" in pill
+
+    # Both text halves must be able to ellipsise. A `<b>` with `nowrap` and
+    # default overflow is simply guillotined by the pill's clip.
+    device = css[css.index(".status-pill b {"):]
+    device = device[: device.index("}")]
+    assert "text-overflow: ellipsis" in device
+    assert "overflow: hidden" in device
+
+
+def test_the_status_pill_does_not_claim_a_weight_source(client):
+    """The pill must not print the hub as if it were where the weights came from.
+
+    `S.hub` is the *preference* — the last source picked in the model sheet, or
+    whatever is in the config. It is not the origin: `resolve_local_hub` on the
+    server silently falls back to whichever source actually holds a complete
+    snapshot, and `POST /api/jobs` logs "using weights from X (Y has no local
+    copy)" while the pill would still have shown Y. So the one configuration the
+    pill appeared to describe was exactly the one it could get wrong.
+
+    Nothing is lost by dropping it: the sheet behind the pill renders
+    `model.local_hub` (the real location), and every history record stores the
+    resolved `hub` from the job request. Guard the removal, and guard the fact
+    that those two places still carry the truth.
+    """
+    js = client.get("/js/app.js").text
+
+    # The pill renders device + model, and nothing about the hub.
+    pins = js[js.index("function renderPins"):]
+    pins = pins[: pins.index("\n  }\n")]
+    assert "$(\"pillDevice\").textContent" in pins
+    assert "$(\"pillModel\").textContent" in pins
+    assert "hubLabel" not in pins, "the pill must not name a weight source"
+
+    # The real source is still reported by the model sheet …
+    models = js[js.index("function renderModels"):]
+    models = models[: models.index("\n  }\n")]
+    assert "model.local_hub" in models, "the sheet must name where the weights are"
+
+    # … and by the backend, which resolves the hub before writing the record.
+    server = open("imgen/app.py", encoding="utf-8").read()
+    assert "resolve_local_hub(model_key, requested_hub)" in server
+    assert '"hub": hub,' in server, "the resolved hub should be stored on the job"
+
+
+def test_the_narrow_bar_does_not_repeat_the_mode_switch(client):
+    """<=900px has two 生图/改图 switches; one is a duplicate.
+
+    The bottom bar carries its own switch next to the run button and is the only
+    one of the two in reach there. Keeping the top bar's copy spent ~166px of the
+    narrowest budget restating it, and was the reason the status pill had to
+    shrink at all.
+    """
+    css = client.get("/css/app.css").text
+
+    # The rule lives in the <=900px block, where the bottom bar appears.
+    narrow = css[css.index("@media (max-width: 900px)"):]
+    narrow = narrow[: narrow.index("@media (max-width: 560px)")]
+    assert ".topbar .mode-switch { display: none; }" in narrow
+
+    # And the bottom bar's copy — the one that stays — is wired up in the client.
+    js = client.get("/js/app.js").text
+    assert '$("modeGen2").onclick = () => setMode("generate");' in js
+    assert '$("modeEdit2").onclick = () => setMode("edit");' in js
+
+
+def test_preset_triggers_share_one_handler(client):
+    """Both the toolbar button and the empty-stage card must open the popover.
+
+    The card used to forward a synthetic `.click()` to the button. That opened
+    the popover during the target phase, but the *original* click kept bubbling to
+    `document`, whose outside-click rule did not treat the card as a trigger, so
+    it closed the popover again inside the same event — the card looked dead.
+
+    Forwarding is what breaks it, so the guard is that the card does not forward:
+    both elements are wired to the same function.
+    """
+    js = client.get("/js/app.js").text
+
+    assert "$(\"btnPresets\").onclick = togglePresets;" in js
+    assert "$(\"startPresets\").onclick = togglePresets;" in js
+    # No synthesised click anywhere — that is the shape of the bug.
+    assert "$(\"startPresets\").onclick = () => $(\"btnPresets\").click()" not in js
+    assert 'startPresets").onclick = () =>' not in js
+
+    # The shared handler stops the event, which is what keeps `document`'s
+    # outside-click rule from seeing the card at all.
+    handler = js[js.index("const togglePresets"): js.index("$(\"btnPresets\").onclick")]
+    assert "stopPropagation" in handler, "the shared handler must stop propagation"
+
+    # And the outside-click rule is unchanged: it still excused the popover and
+    # the two toolbar triggers, and still closes on anything else.
+    doc = js[js.index('document.addEventListener("click"'):]
+    guard = doc[:doc.index("closePops();")]
+    for selector in (".pop", "#btnPresets", "#statusBtn"):
+        assert f'closest("{selector}")' in guard, f"{selector} should stay excused"
+
+
+def test_brand_wordmark_is_served_transparent(client):
+    """The wordmark must be transparent artwork, and reversed for the dark bar.
+
+    Both properties are easy to lose silently — re-exporting the file from the
+    original (which has a flat light-grey plate) would put a pale rectangle on
+    the header, and shipping the near-black original would make the name
+    invisible on it (1.0:1 contrast).
+    """
+    import io
+
+    from PIL import Image
+
+    page = client.get("/").text
+    assert 'class="brand-word"' in page
+    assert "/brand/imgen-wordmark-dark.png" in page
+    # The accessible name has to survive the swap from text to image.
+    assert 'alt="IMGEN"' in page and 'data-i-alt="app"' in page
+
+    for name in ("imgen-wordmark", "imgen-wordmark-dark"):
+        res = client.get(f"/brand/{name}.png")
+        assert res.status_code == 200, name
+        im = Image.open(io.BytesIO(res.content))
+        assert im.mode == "RGBA", f"{name} is {im.mode}, so it has no transparency"
+        alpha = im.getchannel("A")
+        lo, hi = alpha.getextrema()
+        assert lo == 0, f"{name}: nothing is fully transparent — a plate is baked in"
+        assert hi > 240, f"{name}: nothing is fully opaque — the strokes are washed out"
+
+    # The header version is the light one, not the near-black original. Compare
+    # only where the ink is actually opaque: transparent pixels carry whatever
+    # colour the source had and would drag the average anywhere.
+    import numpy as np
+
+    dark = Image.open(io.BytesIO(client.get("/brand/imgen-wordmark-dark.png").content))
+    arr = np.array(dark)
+    ink = arr[arr[:, :, 3] > 200][:, :3]
+    assert len(ink), "the dark variant has no visible ink"
+    avg = ink.mean(axis=0)
+    assert avg.min() > 200, f"the dark variant is not light enough for the header ({avg})"
+
+    plain = Image.open(io.BytesIO(client.get("/brand/imgen-wordmark.png").content))
+    plain_ink = np.array(plain)[np.array(plain)[:, :, 3] > 200][:, :3]
+    assert plain_ink.mean(axis=0).max() < 60, "the README variant should stay near-black"
+
+
 def test_weight_dirs_normalisation(tmp_path):
     from imgen.config import ConfigStore, normalize_weight_dirs
     from imgen.paths import AppPaths
@@ -623,3 +788,43 @@ def test_older_records_gain_frames_without_a_migration(client, tmp_path):
     assert row["output_count"] == 3
     assert row["image_urls"][2] == f"/api/outputs/{job_id}_2"
     assert "extra_images" not in row["params"]
+
+
+def test_count_stepper_shares_the_engines_bound(client):
+    """The panel's 1..4 stepper and the engine's clamp must agree.
+
+    The bound lives in MAX_NUM_IMAGES so the two cannot drift: a UI that offers
+    a number the engine silently reduces is a lie about what will happen.
+    """
+    from imgen.constants import MAX_NUM_IMAGES
+
+    page = client.get("/").text
+    js = client.get("/js/app.js").text
+
+    # The control exists and publishes the same bound the engine clamps to.
+    assert 'id="nImages"' in page
+    assert 'id="nImagesMinus"' in page and 'id="nImagesPlus"' in page
+    # It is a stepper, not a free text field: `readonly` is what makes the two
+    # buttons and the arrow keys the only ways in.
+    assert 'readonly' in page[page.index('id="nImages"'): page.index('id="nImages"') + 160]
+
+    # The client reads the bound from bootstrap instead of hardcoding it.
+    assert client.get("/api/bootstrap").json()["defaults"]["max_images"] == MAX_NUM_IMAGES
+    assert "maxImages()" in js
+    assert "MAX_NUM_IMAGES" not in js  # server-side only; the client uses the payload
+
+    # And the engine's clamp is the shared constant, not a literal 4.
+    engine = open("imgen/engine.py", encoding="utf-8").read()
+    assert "min(MAX_NUM_IMAGES" in engine
+    assert "min(4," not in engine
+
+
+def test_bootstrap_reports_the_sampling_defaults(client):
+    """The panel labels values as "the default", so it reads them from the
+    engine rather than repeating the numbers in two places."""
+    from imgen.constants import DEFAULT_CFG, DEFAULT_STEPS
+
+    defaults = client.get("/api/bootstrap").json()["defaults"]
+    assert defaults["steps"] == DEFAULT_STEPS
+    assert defaults["cfg"] == DEFAULT_CFG
+    assert defaults["max_images"] == 4
