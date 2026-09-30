@@ -228,6 +228,69 @@ def test_demo_edit_with_reference(client, model_key):
     assert item["params"]["follow_ref_aspect"] is True
 
 
+def test_a_generate_run_ignores_reference_uploads(client):
+    """A 生图 record must not carry references, even if the request sends them.
+
+    The panel keeps `S.refs` while switching modes (a reference the user just
+    picked should survive a trip through 生图, and `sendToEdit` sets the mode
+    *before* adding the file), but the reference section is hidden in 生图 — so
+    the files used to be posted by a run that could not show them. The engine
+    ignored them all along (`images=refs if mode == "edit" else None`), which is
+    what made it insidious: the picture was generated correctly, while the record
+    saved the upload and the detail overlay listed a 参考图 that had no part in
+    the result.
+
+    Two layers are checked here — the server refuses to use them, and the public
+    view refuses to publish them — plus the third (the client not sending them)
+    by inspecting the source.
+    """
+    buf = BytesIO()
+    Image.new("RGB", (64, 64), (200, 40, 40)).save(buf, format="PNG")
+    buf.seek(0)
+    response = client.post(
+        "/api/jobs",
+        data={
+            "mode": "generate",
+            "prompt": "a red apple on a wooden table",
+            "model_key": "qwen-image-2.1",
+            "hub": "huggingface",
+            "scale": "1k",
+            "steps": "8",
+        },
+        # A stray reference on a generate job — exactly what a mode switch used
+        # to produce.
+        files=[("files", ("stale-ref.png", buf, "image/png"))],
+    )
+    assert response.status_code == 200
+    job_id = response.json()["id"]
+
+    import time
+
+    item = None
+    for _ in range(50):
+        item = client.get(f"/api/jobs/{job_id}").json()
+        if item["status"] in {"succeeded", "failed"}:
+            break
+        time.sleep(0.05)
+    assert item["status"] == "succeeded"
+    assert item["mode"] == "generate"
+
+    # Nothing is published, so the overlay has no 参考图 group to render.
+    assert item["ref_count"] == 0
+    assert item["ref_urls"] == []
+    # `ref_paths` is the stored form and is never sent to the browser, which is
+    # also why the count above is the only thing a caller can see. Fetching a
+    # reference URL must 404: the run has none.
+    assert client.get(f"/api/refs/{job_id}/0").status_code == 404
+
+    # The client does not send them in this mode to begin with.
+    js = client.get("/js/app.js").text
+    assert 'if (S.mode === "edit") {' in js, "the upload must be gated on the mode"
+    gated = js[js.index('if (S.mode === "edit") {'):]
+    gated = gated[: gated.index("return fd;")]
+    assert 'fd.append("files"' in gated, "the append must sit inside the guard"
+
+
 def test_jobs_never_expose_local_paths(client):
     """The detail view needs URLs, not the absolute paths on disk."""
     response = client.post(

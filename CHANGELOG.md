@@ -340,6 +340,17 @@ server — see **Multi-image runs** below.
   scrollbar itself stays hidden.
 
 ### Fixes
+- **A reference image picked for an edit leaked into the next generation.** The
+  panel keeps `S.refs` across a mode switch — rightly, since a reference the user
+  just chose should survive a trip through 生图, and `sendToEdit` sets the mode
+  *before* it adds the file — but the reference section is hidden in 生图, and the
+  run posted the files anyway. What made it insidious is that the picture came out
+  correct: the engine has always ignored them (`images=refs if mode == "edit" else
+  None`), while the server saved them and the detail overlay listed a 参考图 the
+  run never used. Closed at three layers — the client does not send them, the
+  server does not decode or store them, and `_public_job` does not publish them —
+  so a record written before this fix also stops showing a reference it ignored.
+  The stored paths stay in the row for `delete()` to clean up.
 - **"送到改图" stayed enabled on a record with no picture.** The rewrite that
   moved the actions into the panel kept the dimmed styling but dropped the
   `disabled` attribute, so the button still took focus and clicks and would send

@@ -78,7 +78,8 @@ def _public_job(item: dict[str, Any], engine=None) -> dict[str, Any]:
 
     The detail view needs the reference-image count, so it is surfaced as
     ``ref_count`` plus ready-made ``ref_urls`` instead of leaking absolute
-    paths on disk.
+    paths on disk. Only a 改图 run publishes them — a generate record has no
+    reference to show, even if one is sitting in its row (see the gate below).
 
     A run with ``num_images > 1`` keeps its extra frames in
     ``params.extra_images``, which holds absolute paths too. They become
@@ -114,8 +115,15 @@ def _public_job(item: dict[str, Any], engine=None) -> dict[str, Any]:
         f"/api/thumbs/{extra_id}" for extra_id in extra_ids
     ]
     item["output_count"] = len(item["image_urls"])
-    item["ref_count"] = len(refs)
-    item["ref_urls"] = [f"/api/refs/{job_id}/{index}" for index in range(len(refs))]
+    # References are a 改图 concept. A generate run is never guided by one, so it
+    # must not publish them even if some row on disk has them stored: records
+    # written before the server learned to ignore stray uploads would otherwise
+    # keep showing a 参考图 group for a picture it had no part in. The stored
+    # paths stay in `ref_paths` for `delete()` to clean up; only the browser-facing
+    # view is gated.
+    refs_in_use = refs if item.get("mode") == "edit" else []
+    item["ref_count"] = len(refs_in_use)
+    item["ref_urls"] = [f"/api/refs/{job_id}/{index}" for index in range(len(refs_in_use))]
     if item.get("status") == "running" and engine is not None:
         item["live_phase"] = engine.phase_status()
     return item
@@ -386,17 +394,26 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
         # The weights may already be on disk from the other source. Use them
         # rather than refusing to run while the file sits right there.
         hub = resolve_local_hub(model_key, requested_hub) or requested_hub
+        # A generate run has no reference images, whatever the request carries.
+        # The engine already ignores them (`images=refs if mode == "edit" else
+        # None`), but the upload loop below would still decode them and the run
+        # would save them — producing a record whose detail overlay lists a 参考图
+        # that never influenced the picture. The client no longer sends them in
+        # this mode; this is the second line, so a direct API call cannot create
+        # such a record either. They are not even decoded: there is no point
+        # validating a file the run will not read.
         refs: list[Image.Image] = []
-        for upload in (files or [])[:MAX_REFERENCE_IMAGES]:
-            data = await upload.read()
-            if not data:
-                continue
-            if len(data) > MAX_UPLOAD_BYTES:
-                raise HTTPException(400, f"{upload.filename} exceeds the 25 MB limit.")
-            try:
-                refs.append(_read_image(data, upload.filename or "image.png"))
-            except Exception as exc:
-                raise HTTPException(400, f"Could not read {upload.filename}: {exc}") from exc
+        if mode == "edit":
+            for upload in (files or [])[:MAX_REFERENCE_IMAGES]:
+                data = await upload.read()
+                if not data:
+                    continue
+                if len(data) > MAX_UPLOAD_BYTES:
+                    raise HTTPException(400, f"{upload.filename} exceeds the 25 MB limit.")
+                try:
+                    refs.append(_read_image(data, upload.filename or "image.png"))
+                except Exception as exc:
+                    raise HTTPException(400, f"Could not read {upload.filename}: {exc}") from exc
 
         job_id = new_id()
         request = {

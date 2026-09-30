@@ -2246,7 +2246,15 @@
     fd.set("transparent", $("rgba").getAttribute("aria-checked") === "true" ? "true" : "false");
     fd.set("follow_ref_aspect", $("follow").getAttribute("aria-checked") === "true" ? "true" : "false");
     fd.set("vae_tiling", $("vaeTiling").value);
-    S.refs.forEach((ref) => fd.append("files", ref.file, ref.file.name));
+    // References belong to 改图. The section is hidden in 生图 but the files stay
+    // in `S.refs` (switching modes must not throw away a reference the user just
+    // picked, and `sendToEdit` sets the mode *before* it adds one), so without
+    // this guard a generate run would post them anyway: the engine ignores them
+    // (`images=refs if mode == "edit" else None`) but the server saved them and
+    // the detail overlay listed a 参考图 the run never used.
+    if (S.mode === "edit") {
+      S.refs.forEach((ref) => fd.append("files", ref.file, ref.file.name));
+    }
     return fd;
   }
 
