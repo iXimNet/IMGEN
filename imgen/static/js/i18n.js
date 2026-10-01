@@ -96,6 +96,23 @@ const I18N = {
     dotWarn: "设备提醒：{msg}",
     dotFailed: "上次加载失败：{msg}",
 
+    /* Releasing VRAM. Stopping a run and giving the card its memory back are
+       two different things: a stop keeps the weights resident so the next run
+       starts instantly, and a release costs a reload. */
+    releaseVram: "释放显存",
+    releaseNote: "停止当前任务并卸载模型，把显存还给系统。之后第一次运行需要重新加载权重。",
+    releaseUsed: "已用 {used} / {total} GB",
+    confirmReleaseAsk: "停止任务并释放显存？",
+    confirmReleaseWhy: "任务会先停下；模型随即卸载，下一次运行需要重新加载。",
+    confirmReleaseNo: "再等等",
+    confirmReleaseYes: "停止并释放",
+    releaseStopping: "已请求停止，等待当前阶段返回…",
+    releaseStoppingPhase: "已请求停止，等待「{phase}」返回…",
+    toastReleased: "已释放 {n} GB 显存",
+    toastReleasedDetail: "模型已卸载，可以直接重新运行，不必重启后台。",
+    toastReleasePending: "还在停止中",
+    toastReleasePendingDetail: "当前阶段不检查停止信号，它结束后会自动释放；也可以再点一次。",
+
     /* Run */
     run: "生成",
     running: "生成中…",
@@ -133,7 +150,7 @@ const I18N = {
     decodingSlowNote: "低显存模式在 CPU 上解码，可能需要几分钟",
     encodingSlowNote: "低显存模式在 CPU 上编码参考图，可能需要几分钟",
     conditioningSlowNote: "参考图较大或低显存搬运权重，读参考图可能要几分钟",
-    stallHint: "已 {s}s 没有新的进度上报：可能仍在编码/解码（看控制台）。若 CPU 与磁盘也都不动，多半是内存不足——可试试打开 VAE Tiling 或关闭其他占内存的程序。",
+    stallHint: "已 {s}s 没有新的进度上报：可能仍在编码/解码（看控制台）。若 CPU 与磁盘也都不动，多半是显存不足——用「释放显存」停下任务并把显存还回去，再用更轻的参数重跑。",
     stallHintOffline: "已 {s}s 无新进度，且服务端没有响应——应用可能已退出或崩溃，请查看它的控制台窗口。",
     metaStep: "Step {s} / {t}",
     metaElapsed: "已用 {s}s",
@@ -299,7 +316,7 @@ const I18N = {
     toastDoneMulti: "生成完成 · {n} 张",
     toastDoneDetail: "{w}×{h} · {s}s · 已存入历史",
     toastCancelled: "已取消",
-    toastCancelledDetail: "这一轮的显存已经释放。",
+    toastCancelledDetail: "任务已停止，权重仍留在显存里，下次可以立刻运行——要腾出显存请用「释放显存」。",
     toastSaved: "已开始下载",
     toastFailed: "生成失败",
     toastReuseKept: "参数已写入左栏",
@@ -432,6 +449,23 @@ const I18N = {
     dotWarn: "Device warning: {msg}",
     dotFailed: "Last load failed: {msg}",
 
+    /* Releasing VRAM. Stopping a run and giving the card its memory back are
+       two different things: a stop keeps the weights resident so the next run
+       starts instantly, and a release costs a reload. */
+    releaseVram: "Free VRAM",
+    releaseNote: "Stop the run and unload the model, handing the memory back. The next run has to load the weights again.",
+    releaseUsed: "Using {used} / {total} GB",
+    confirmReleaseAsk: "Stop the run and free the VRAM?",
+    confirmReleaseWhy: "The run stops first; the model is then unloaded, so the next run reloads it.",
+    confirmReleaseNo: "Not yet",
+    confirmReleaseYes: "Stop and free",
+    releaseStopping: "Stop requested — waiting for the current stage to return…",
+    releaseStoppingPhase: "Stop requested — waiting for “{phase}” to return…",
+    toastReleased: "Freed {n} GB of VRAM",
+    toastReleasedDetail: "The model is unloaded. Run again right here — no need to restart the server.",
+    toastReleasePending: "Still stopping",
+    toastReleasePendingDetail: "A stage does not check the stop flag while it runs; the memory is released the moment it returns. You can also ask again.",
+
     run: "Generate",
     running: "Generating…",
     cancel: "Cancel",
@@ -466,7 +500,7 @@ const I18N = {
     decodingSlowNote: "Low-VRAM mode decodes on the CPU — this can take minutes",
     encodingSlowNote: "Low-VRAM mode encodes the references on the CPU — this can take minutes",
     conditioningSlowNote: "Large references or low-VRAM weight streaming — reading the references can take minutes",
-    stallHint: "No progress reported for {s}s — it may still be encoding/decoding (check the console). If the CPU and the disk are idle too, memory is most likely exhausted: try turning VAE tiling on, or close other memory-hungry apps.",
+    stallHint: "No progress reported for {s}s — it may still be encoding/decoding (check the console). If the CPU and the disk are idle too, memory is most likely exhausted: use “Free VRAM” to stop the run and hand the card back, then retry with lighter settings.",
     stallHintOffline: "No progress for {s}s and the server is not answering — the app may have exited. Check its console window.",
     metaStep: "Step {s} / {t}",
     metaElapsed: "{s}s elapsed",
@@ -625,7 +659,7 @@ const I18N = {
     toastDoneMulti: "Finished · {n} images",
     toastDoneDetail: "{w}×{h} · {s}s · saved to history",
     toastCancelled: "Cancelled",
-    toastCancelledDetail: "VRAM from this run is released.",
+    toastCancelledDetail: "The run stopped. The weights stay on the card so the next run starts instantly — use “Free VRAM” when you want the memory back.",
     toastSaved: "Download started",
     toastFailed: "Generation failed",
     toastReuseKept: "Settings written to the left panel",

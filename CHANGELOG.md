@@ -405,6 +405,53 @@ server — see **Multi-image runs** below.
   the drawer when the window crosses into the narrow layout, where a folded
   drawer leaves it nothing to anchor to.
 
+### Freeing VRAM
+- **Stopping a run and giving the card's memory back are two different things,
+  and the studio only ever did the first while announcing the second.** Every
+  cancel toasted "VRAM from this run is released". Nothing of the sort happened:
+  `cancel()` sets a flag, and the weights stay exactly where they are — which is
+  the point of a resident load, since it is what makes the next run start in a
+  second. Nothing in the app could actually hand the memory back short of
+  quitting the server.
+- `POST /api/engine/release` is that action. It stops the run, waits for it to
+  end, unloads the pipeline and reports what it gave back, measured:
+  `freed_gb`, plus the card's live `used_gb` / `total_gb`. `GET /api/bootstrap`
+  now carries the same `engine.vram` reading, so the studio shows the number a
+  release would change instead of a total from boot.
+- **The answer is honest about the hard case.** A stage does not check the stop
+  flag while it runs — one CUDA op cannot be interrupted from Python — so a
+  request that arrives mid-stage returns `released: false, stopping: true` with
+  the stage it is waiting on, and the studio keeps asking until the run returns.
+  It never unloads while a run is in flight: the worker holds its own reference,
+  so dropping the pipeline frees nothing and would leave the studio reporting a
+  loaded model next to a job that is still going.
+- **Dropping the reference is not enough on its own.** A diffusers pipeline is a
+  web of reference cycles, so its modules stay alive until the cyclic collector
+  runs, and `empty_cache()` only returns blocks the *allocator* still holds — it
+  cannot free memory live tensors are using. Measured on Image21-INT8 (18.33 GB
+  resident): `pipe = None` + `empty_cache()` left **15.1 GB** on the card;
+  adding `gc.collect()` took it to 1.55 GB. `unload()` — which model switching
+  has always used — was missing that step, so it was returning about a fifth of
+  what it appeared to.
+- Two ways in, one implementation: the progress block offers it once waiting has
+  stopped being the plan (the run has gone quiet, or the engine already said the
+  stage takes minutes), and the environment popover offers it always, because
+  freeing the card is not only something you do about a run. It asks first — the
+  next run pays for it with a reload.
+- New keys in both languages, and the cancel toast now says what a cancel
+  actually does: the run stopped, the weights are still resident, and "release
+  VRAM" is where the memory goes back.
+
+- **What it cannot do.** A run that died with a CUDA context error is out of
+  reach: once `cudaErrorUnknown` has been reported the context is poisoned,
+  `mem_get_info()` itself fails, and every later run fails the same way until
+  the process exits. Measured while chasing the 2K case — after the error,
+  `release` could no longer read VRAM (`freed_gb: null`) and a fresh 1K run
+  failed identically, and the card's own accounting went nonsensical until the
+  server was killed. That one needs a restart, and nothing in the studio can
+  substitute for it. Releasing is for the run that is *stuck*, not the one that
+  is already broken.
+
 ### Fixes
 - **An INT8 run stuck for minutes in conditioning was reported as fast.** The
   "expected to be slow" flag on the `condition` stage was `_group_offload()`,
@@ -423,6 +470,17 @@ server — see **Multi-image runs** below.
   actually wait on. Generation is never flagged here — a text-only prompt never
   runs the vision tower. The note text gained the large-reference case, since it
   previously named low-VRAM streaming only.
+- **The reference edge is the lever, and it is steeper than the pixel count
+  suggests.** Measured back to back with the *output* pinned at 2048² and
+  nothing else changed (Image21-INT8 resident, 2 references, CFG 4.0):
+  `参考图边长` 2048 put the conditioning pass at **737.6s**; 1024 finished it in
+  **1.5s**. Four times fewer reference pixels, roughly five hundred times less
+  time — the pass is not merely proportional to what it reads. The same run also
+  ends holding essentially all of the card: after the 2048-edge conditioning
+  finished, the 32 GB card read 31.9 GB in use with nothing running. Two
+  consequences worth knowing: `参考图边长` is the single biggest knob for an edit,
+  and a 2K edit at CFG 4.0 that gets past conditioning still dies at sampling
+  (`cudaErrorUnknown`) on a full card, which no reference setting changes.
 - **Image21-INT8 forced CPU offload on every machine.** `_load` hard-coded
   `offload = True` for the INT8 loader, so `enable_model_cpu_offload()` handed
   every module to the accelerator for its turn and took it back afterwards —

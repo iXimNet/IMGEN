@@ -286,6 +286,11 @@
           <div class="prow"><b id="progressPhase">—</b><span id="progressText"></span></div>
           <div class="bar" id="progressTrack"><i id="progressBar"></i></div>
           <p class="phint hidden" id="progressHint"></p>
+          <!-- Stopping a run and giving the card its memory back are two
+               different things, and only the second one is an escape hatch for
+               a run that looks wedged. It lives here, next to the staleness
+               notice, because this is the moment someone looks for it. -->
+          <div class="relrow hidden" id="releaseRow"></div>
         </div>
       </div>
       <!-- 多图成片：一次出多张时在这里切换，独占一行以免遮住画面 -->
@@ -360,6 +365,10 @@
       <svg class="ico" width="16" height="16"><use href="#i-cpu"/></svg>
       <div><b id="envDevice">—</b><span id="envMeta">—</span></div>
     </div>
+    <!-- The same action as the one in the progress block, for when nothing is
+         running: the card is the thing being freed, not the job. -->
+    <div class="relrow" id="releaseEnvRow"></div>
+    <p class="pop-note" data-i="releaseNote"></p>
     <div class="grp"><span data-i="switchModel">可切换的模型</span><span class="pop-count" id="modelCount">—</span></div>
     <div class="models" id="modelList"></div>
     <button type="button" class="btn wide" id="goDownload"><svg class="ico" width="14" height="14"><use href="#i-download"/></svg><span data-i="goDownload">去下载更多模型…</span></button>

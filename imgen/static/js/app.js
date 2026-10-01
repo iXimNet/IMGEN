@@ -61,6 +61,18 @@
        looking at one record, not a mode: closing puts it back. */
     detailWide: false,
     download: { key: null, pct: 0, bytes: 0, total: null },
+    /* Freeing VRAM: the confirmation being asked (`ask`), the wait for the
+       running stage to return (`stopping`), which host shows it, and the stage
+       the wait is on. Kept apart from `busy` because a release also applies
+       when nothing is running. */
+    releasing: false,
+    releaseStage: null,
+    releaseHost: null,
+    releasePhase: null,
+    /* The run has gone quiet past the stall threshold. One of the two states
+       that put the release action in the progress block: it is the thing you
+       reach for once you have stopped waiting, not part of every run. */
+    stalled: false,
   };
 
   const $ = (id) => document.getElementById(id);
@@ -361,6 +373,14 @@
     wirePromptFolds();
   }
 
+  /* Translate a freshly built fragment. Markup that is thrown away and rebuilt
+     can be interpolated at paint time, but markup that must survive a repaint —
+     the release confirmation owns its host until it is answered — has to carry
+     `data-i` and be painted here instead. */
+  function paintI18n(root) {
+    $$("[data-i]", root).forEach((el) => { el.textContent = tr(el.getAttribute("data-i")); });
+  }
+
   function applyI18n() {
     document.documentElement.lang = S.lang === "zh" ? "zh-Hans" : "en";
     $$("[data-i]").forEach((el) => { el.textContent = tr(el.getAttribute("data-i")); });
@@ -407,6 +427,9 @@
     // The stage readout is language-sensitive too; a switch mid-render must not
     // leave "VAE 解码中…" on screen in English mode.
     renderPhase();
+    // The release row is drawn by script in two places, so the language switch
+    // reaches it from here rather than from a `[data-i]` pass.
+    renderReleaseSlots();
     renderTools();
     // The frame strip's labels are spoken, not drawn — they still have to
     // follow the language, or a screen reader announces the old one.
@@ -1692,6 +1715,9 @@
           ? tfx("dotReady", { model: modelLabel(engine.loaded.model_key) })
           : tr("dotIdle");
     $("statusBtn").title = `${tr("envTitle")} · ${health}`;
+    // The release row shows how much of the card is in use, and that number
+    // lives in the bootstrap payload this runs right after.
+    renderReleaseSlots();
     renderPins();
   }
 
@@ -2194,6 +2220,9 @@
     S.busy = busy;
     renderRun();
     renderTools();
+    // The progress block offers "release VRAM" only while there is something to
+    // stop, so it follows the busy flag like the rest of that block.
+    renderReleaseSlots();
     // Every exit path (complete, cancel, error) funnels through here; the
     // stage state must never outlive the job that started it.
     if (busy) {
@@ -2232,6 +2261,7 @@
       S.phaseSlow = !!slow;
       S.phaseAt = Date.now() - (elapsedMs || 0);
       renderPhase();
+      renderReleaseSlots();
       return;
     }
     stopPhaseUi();
@@ -2243,6 +2273,9 @@
     track.classList.add("pulse");
     S.phaseTimer = setInterval(renderPhase, 1000);
     renderPhase();
+    // A stage the engine already calls slow is the other half of "you may want
+    // to stop waiting", so the release row follows this flag.
+    renderReleaseSlots();
   }
 
   function renderPhase() {
@@ -2264,6 +2297,9 @@
     S.phaseSlow = false;
     const track = $("progressTrack");
     if (track) track.classList.remove("pulse");
+    // The release row is offered while a slow stage is running, so it goes away
+    // with the stage rather than with the run.
+    renderReleaseSlots();
   }
 
   /* Nothing inside a long encode checks a cancel flag, so a run that stops
@@ -2286,14 +2322,22 @@
       if (!S.busy) return;
       const since = S.lastEventAt || S.startedAt || Date.now();
       const idle = Date.now() - since;
-      if (idle < STALL_MS) {
+      const stalled = idle >= STALL_MS;
+      if (!stalled) {
         hint.classList.add("hidden");
-        return;
+      } else {
+        hint.textContent = tfx(S.offline ? "stallHintOffline" : "stallHint", {
+          s: Math.round(idle / 1000),
+        });
+        hint.classList.remove("hidden");
       }
-      hint.textContent = tfx(S.offline ? "stallHintOffline" : "stallHint", {
-        s: Math.round(idle / 1000),
-      });
-      hint.classList.remove("hidden");
+      // The release action shows up with the stall notice, so the two arrive
+      // together: the moment the studio stops claiming progress is the moment
+      // offering a way out is worth the row it takes.
+      if (stalled !== S.stalled) {
+        S.stalled = stalled;
+        renderReleaseSlots();
+      }
     }, 1000);
   }
 
@@ -2302,8 +2346,148 @@
       clearInterval(S.watchdog);
       S.watchdog = 0;
     }
+    S.stalled = false;
     const hint = $("progressHint");
     if (hint) hint.classList.add("hidden");
+  }
+
+  /* ======================================================================
+     Releasing VRAM
+     Stopping a run and giving the card's memory back are two different things,
+     and the studio used to announce the second whenever it did the first. A
+     cancel keeps the weights resident on purpose — that is what makes the next
+     run start in a second — and it frees nothing at all. This is the action
+     that really frees, and because it costs a reload afterwards it asks first.
+
+     One implementation, two hosts: the progress block, where someone looks when
+     a run has gone quiet, and the environment popover, for when nothing is
+     running and the card itself is the thing to hand back.
+     ====================================================================== */
+  const RELEASE_HOSTS = ["releaseRow", "releaseEnvRow"];
+  // A stage does not check the stop flag while it runs — one CUDA op cannot be
+  // interrupted from Python — so the request is repeated until the run returns
+  // from whatever it is inside. 5s x 120 is long enough for the worst measured
+  // stage (a 2K conditioning pass, minutes) without leaving a spinner forever.
+  const RELEASE_POLL_MS = 5000;
+  const RELEASE_TRIES = 120;
+
+  function vramReadout() {
+    const vram = ((S.bootstrap && S.bootstrap.engine) || {}).vram;
+    if (!vram || vram.used_gb == null) return "";
+    return tfx("releaseUsed", { used: vram.used_gb, total: vram.total_gb });
+  }
+
+  function releaseStoppingText() {
+    const key = PHASE_LABEL[S.releasePhase];
+    return key ? tfx("releaseStoppingPhase", { phase: tr(key) }) : tr("releaseStopping");
+  }
+
+  /* The progress block only offers it once waiting has stopped being the plan:
+     the run has gone quiet, or the engine already said this stage takes
+     minutes. The environment popover offers it always, because freeing the card
+     is not only something you do about a run. */
+  function wantsRelease() {
+    return S.busy && (S.stalled || S.phaseSlow);
+  }
+
+  function renderReleaseSlots() {
+    RELEASE_HOSTS.forEach((id) => {
+      const host = $(id);
+      if (!host) return;
+      // The confirmation owns this host until it is answered. Repainting would
+      // throw its buttons away, so its text follows the language through
+      // `data-i` instead.
+      if (S.releaseStage === "ask" && S.releaseHost === id) return;
+      // A wait in flight is shown wherever it was started, even if the row
+      // would otherwise have gone away underneath it.
+      if (id === "releaseRow" && S.releaseStage !== "stopping") {
+        host.classList.toggle("hidden", !wantsRelease());
+      }
+      if (S.releaseStage === "stopping") {
+        host.innerHTML = `<span class="relnote">${esc(releaseStoppingText())}</span>`;
+        return;
+      }
+      const used = vramReadout();
+      host.innerHTML =
+        `<button type="button" class="btn sm"${S.releasing ? " disabled" : ""}>` +
+          `${esc(tr("releaseVram"))}</button>` +
+        (used ? `<span class="relnote">${esc(used)}</span>` : "");
+      host.querySelector("button").onclick = () => askRelease(id);
+    });
+  }
+
+  async function releaseVram() {
+    if (S.releasing) return;
+    S.releasing = true;
+    S.releaseStage = "stopping";
+    S.releasePhase = (((S.bootstrap || {}).engine || {}).phase || {}).name || null;
+    renderReleaseSlots();
+    try {
+      for (let attempt = 0; attempt < RELEASE_TRIES; attempt += 1) {
+        let out;
+        try {
+          out = await api("/api/engine/release", { method: "POST" });
+        } catch (err) {
+          S.releaseStage = null;
+          reportError(err);
+          return;
+        }
+        if (out.released) {
+          S.releaseStage = null;
+          // `released` means the engine answered from an idle state, so whatever
+          // this tab was showing as running is over.
+          S.jobId = null;
+          setBusy(false);
+          await refreshBootstrap().catch(() => {});
+          renderEnv();
+          renderModels();
+          toast("ok",
+            tfx("toastReleased", { n: out.freed_gb != null ? out.freed_gb : "—" }),
+            tr("toastReleasedDetail"));
+          return;
+        }
+        // Still inside a stage. Keep the note up, say which one, and ask again.
+        S.releasePhase = out.phase || S.releasePhase;
+        renderReleaseSlots();
+        await new Promise((resolve) => setTimeout(resolve, RELEASE_POLL_MS));
+      }
+      // Ten minutes inside one stage is not a working run. The note stays up so
+      // the state is visible, and the reader can ask again.
+      toast("err", tr("toastReleasePending"), tr("toastReleasePendingDetail"));
+    } finally {
+      S.releasing = false;
+      renderReleaseSlots();
+    }
+  }
+
+  /* One confirmation, two hosts, so the wording and the consequence cannot drift
+     apart between them. */
+  function askRelease(hostId) {
+    S.releaseStage = "ask";
+    S.releaseHost = hostId;
+    const host = $(hostId);
+    host.innerHTML =
+      `<div class="confirm">` +
+        `<div class="confirm-head">${icon("i-alert", 16)}` +
+          `<span><span data-i="confirmReleaseAsk"></span><b data-i="confirmReleaseWhy"></b></span>` +
+        `</div>` +
+        `<div class="confirm-btns">` +
+          `<button type="button" class="btn r-no" data-i="confirmReleaseNo"></button>` +
+          `<button type="button" class="btn btn-danger-solid r-yes" data-i="confirmReleaseYes"></button>` +
+        `</div>` +
+      `</div>`;
+    paintI18n(host);
+    host.querySelector(".r-no").onclick = () => closeReleaseAsk();
+    host.querySelector(".r-yes").onclick = () => {
+      closeReleaseAsk();
+      releaseVram().catch(reportError);
+    };
+  }
+
+  function closeReleaseAsk() {
+    S.releaseStage = null;
+    S.releaseHost = null;
+    renderReleaseSlots();
   }
 
   /* Adopt the stage the server reports. A reload or a second tab has no socket
@@ -2370,7 +2554,9 @@
     setBusy(false);
     S.jobId = null;
     $("progress").classList.add("hidden");
-    toast("ok", tr("toastCancelled"), tr("toastCancelledDetail"));
+    // A release in flight is about to say something more useful than "stopped",
+    // and it is the same event: one toast, from the release, not two.
+    if (!S.releasing) toast("ok", tr("toastCancelled"), tr("toastCancelledDetail"));
   }
 
   /* Ask the server what happened to the job this tab is tracking. Never infer

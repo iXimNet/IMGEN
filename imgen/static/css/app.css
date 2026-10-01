@@ -474,6 +474,13 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; ma
 .progress .bar.pulse i { width: 34% !important; animation: progSweep 1.15s ease-in-out infinite; }
 /* A run that stops reporting: say so instead of implying progress. */
 .progress .phint { margin: 9px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--accent); }
+/* Freeing VRAM. One row, two hosts — the progress block and the environment
+   popover — so a button in the normal state and the confirmation in its place
+   while it asks. Stopping a run keeps the weights resident; only this hands the
+   memory back, and it is the way out of a run that has gone quiet. */
+.relrow { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex: none; }
+.relrow .relnote { flex: 1; min-width: 0; font-size: 11.5px; line-height: 1.5; color: var(--ink-faint); }
+.relrow .confirm { margin: 0; }
 
 .toolbar { display: flex; gap: 8px; justify-content: center; padding: 0 16px 15px; }
 

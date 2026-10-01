@@ -42,6 +42,12 @@ INT8_RESIDENT_HEADROOM_GB = 7.0
 # points, so the flag errs towards announcing a stage the reader will wait on.
 SLOW_CONDITION_MEGAPIXELS = 4.0
 
+# How long a release waits for the run in flight before reporting back. A stop
+# request lands at a stage boundary, and nothing inside a stage checks it — a
+# single CUDA op cannot be interrupted from Python — so this is a first attempt
+# rather than a guarantee. The studio keeps asking until the run really ends.
+RELEASE_WAIT_S = 15.0
+
 
 def resolve_vae_tiling(vae_tiling) -> bool:
     """Tiling is a VRAM tradeoff, never a quality win, so it stays opt-in.
@@ -115,6 +121,9 @@ class Engine:
             "last_error": self._last_error,
             "phase": self.phase_status(),
             "device": self.device_info,
+            # What the card is holding right now, so the studio can show the
+            # number a release would change instead of a total from boot.
+            "vram": self.vram_usage(),
         }
 
     def phase_status(self) -> dict[str, Any] | None:
@@ -170,13 +179,90 @@ class Engine:
             self._pipe = None
             self._loaded = None
             self._last_error = None
-            try:
-                import torch
+        self._free_cuda_cache()
 
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            except Exception:
-                pass
+    def vram_usage(self) -> dict[str, Any] | None:
+        """How much of the card is in use, or None when there is no CUDA device.
+
+        Device-wide on purpose: the question the studio asks is "is the card
+        free", and another process holding memory is part of that answer.
+        """
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                return None
+            free, total = torch.cuda.mem_get_info()
+            return {
+                "used_gb": round((total - free) / (1024**3), 2),
+                "total_gb": round(total / (1024**3), 2),
+            }
+        except Exception:
+            return None
+
+    def _free_cuda_cache(self) -> None:
+        """Hand memory back after the weights are gone.
+
+        Letting go of the reference is only half of it. A diffusers pipeline is
+        a web of reference cycles, so its modules stay alive until the cyclic
+        collector runs, and `empty_cache()` only returns blocks the *allocator*
+        is still holding — it cannot free memory live tensors are using. Without
+        the collection step the cache is emptied and nothing is given back.
+        """
+        try:
+            import gc
+
+            import torch
+
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+        except Exception:
+            pass
+
+    def wait_idle(self, timeout: float) -> bool:
+        """Wait for the run in flight to finish. False if it is still going."""
+        deadline = time.time() + max(0.0, timeout)
+        while self._busy and time.time() < deadline:
+            time.sleep(0.05)
+        return not self._busy
+
+    def release(self, timeout: float | None = None) -> dict[str, Any]:
+        """Stop what is running and give the card its memory back.
+
+        Deliberately not the same thing as `cancel()`. Cancelling keeps the
+        weights where they are so the next run starts in a second, and frees
+        nothing at all — the studio used to announce a release every time it
+        cancelled, which was simply untrue. Freeing costs a reload afterwards,
+        so it is something the reader asks for.
+
+        The unload only happens once the run has actually ended. Dropping the
+        pipeline mid-stage frees nothing anyway — the worker holds its own
+        reference and is inside a CUDA op — and it would leave the studio
+        reporting a loaded model next to a job that is still going.
+        """
+        before = self.vram_usage()
+        started = time.time()
+        if self._busy:
+            self.cancel()
+        stopped = self.wait_idle(RELEASE_WAIT_S if timeout is None else timeout)
+        freed_gb = None
+        if stopped:
+            self.unload()
+            after = self.vram_usage()
+            if before and after:
+                freed_gb = round(max(0.0, before["used_gb"] - after["used_gb"]), 2)
+        phase = self.phase_status()
+        return {
+            "ok": True,
+            "released": stopped,
+            "stopping": not stopped,
+            "waited_ms": int((time.time() - started) * 1000),
+            "freed_gb": freed_gb,
+            "vram": self.vram_usage(),
+            "phase": (phase or {}).get("name"),
+        }
 
     def load(self, model_key: str, hub: str, callback: ProgressFn | None = None) -> dict[str, Any]:
         """Load a pipeline, remembering the failure so the studio can show it.

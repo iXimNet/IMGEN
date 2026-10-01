@@ -364,6 +364,21 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
         engine.unload()
         return {"ok": True}
 
+    @app.post("/api/engine/release")
+    def api_release() -> dict[str, Any]:
+        """Stop the run in flight, unload the weights and hand the VRAM back.
+
+        The escape hatch for a run that looks wedged, and the only thing in the
+        studio that really frees memory: cancelling a job keeps the weights
+        resident so the next run starts in a second, and frees nothing.
+
+        `released` is the honest half of the answer. A stage does not check the
+        stop flag while it runs — one CUDA op cannot be interrupted from Python —
+        so a request that arrives mid-stage comes back `stopping: true` with
+        nothing freed, and the caller is expected to ask again.
+        """
+        return engine.release()
+
     @app.post("/api/jobs")
     async def create_job(
         mode: str = Form("generate"),
