@@ -77,6 +77,13 @@ const I18N = {
     negative: "负向提示词",
     negativePh: "只写不想要的东西",
     negativeHint: "仅在 CFG > 1 时生效；CFG 为 1.0 时这里填了也没用。",
+
+    /* Negative-preset popover */
+    negPresets: "预置",
+    negPresetsTitle: "负向预置",
+    negClear: "清空",
+    negCount: "已选 {on} / {n} 组",
+    negNote: "点一组加进去，再点一次拿出来；已经写好的内容不会被覆盖。同样只在 CFG > 1 时生效。",
     vaeTiling: "VAE Tiling",
     vaeTilingShort: "默认关闭",
     vaeOn: "on · 省显存",
@@ -406,6 +413,13 @@ const I18N = {
     negative: "Negative prompt",
     negativePh: "Only what you don't want",
     negativeHint: "Only used when CFG > 1; at CFG 1.0 it has no effect.",
+
+    /* Negative-preset popover */
+    negPresets: "Presets",
+    negPresetsTitle: "Negative presets",
+    negClear: "Clear",
+    negCount: "{on} / {n} on",
+    negNote: "Click a group to add it, click again to take it back out. Anything you typed yourself is left alone. Also only used when CFG > 1.",
     vaeTiling: "VAE tiling",
     vaeTilingShort: "off by default",
     vaeOn: "on · saves VRAM",

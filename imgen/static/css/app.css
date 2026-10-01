@@ -571,6 +571,23 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; ma
 .pcard span { display: block; font-size: 12px; color: var(--ink-dim); line-height: 1.5; max-height: 3em; overflow: hidden; }
 .empty-row { font-size: 12px; color: var(--ink-dim); line-height: 1.6; padding: 14px 4px; margin: 0; }
 
+/* Negative presets. A card here is a toggle, not a one-shot pick, so it needs a
+   resting face that does not impersonate the applied one: three steps of
+   brightness (panel → hover → applied), never a hue, per the theme's rule that
+   only the safelight carries colour. The tick's slot is always laid out — only
+   its opacity moves — or each click would nudge the row's text. */
+#popNeg { width: min(348px, calc(100% - 16px)); }
+#negList .pcard { background: transparent; }
+#negList .pcard:hover { background: var(--surface-2); border-color: var(--sel-line); }
+#negList .pcard.on { background: var(--sel); border-color: var(--sel-line); }
+#negList .pcard b { display: flex; align-items: center; gap: 6px; }
+#negList .pcard b .tick { margin-left: auto; flex: none; opacity: 0; color: var(--ink); }
+#negList .pcard.on b .tick { opacity: 1; }
+
+/* A label row may carry a trailing control. It belongs at the far edge, like
+   `.flabel-note`, and must not be squeezed by the label's own width. */
+.flabel .btn { margin-left: auto; flex: none; }
+
 .grp { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.08em; color: var(--ink-faint); margin: 4px 0 0; text-transform: uppercase; }
 .grp:first-child { margin-top: 0; }
 /* Trailing action on a group heading, pushed to the right edge. */

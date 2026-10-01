@@ -354,6 +354,28 @@ server — see **Multi-image runs** below.
   hijacking the wheel once it hits either end), and the active category is
   scrolled into view without yanking the strip when it is already visible. The
   scrollbar itself stays hidden.
+- **Negative prompts got a preset library too.** The advanced block offered one
+  empty field and a placeholder, while the positive prompt had a whole library a
+  click away. A `预置` button now rides on the field's own label row and opens
+  seven bundles — 基础兜底, 画质, 人体结构, 文字与标志, AI 感与伪影, 构图问题,
+  风格跑偏 — shipped in `prompts.json` next to the positive ones. The button sits
+  *beside* the label rather than inside it: a button nested in a `<label>` would
+  also forward the click to the field it points at.
+- **A bundle is a toggle, not a fill.** Clicking one merges its terms into the
+  field, clicking it again takes them back out, so bundles combine and the
+  user's own wording is never overwritten. On/off is therefore *derived* from the
+  textarea on every repaint instead of stored: typing a bundle's terms by hand
+  lights it up, dropping one puts it out, and there is no second source of truth
+  to drift. Removal works term by term and ignores case and spacing. The bundles
+  are kept pairwise disjoint — asserted in the tests — because a term shared by
+  two bundles would be torn out of a bundle still meant to be on.
+- Both languages carry their own term list, so a click inserts Chinese in Chinese
+  and English in English, and a bundle applied in one still reads as applied —
+  and still clears completely — in the other. The popover opens *beside* the
+  panel rather than under its trigger: dropped underneath it would cover the very
+  field whose filling is the only feedback a toggle gives. It also goes away with
+  the drawer when the window crosses into the narrow layout, where a folded
+  drawer leaves it nothing to anchor to.
 
 ### Fixes
 - **A reference image picked for an edit leaked into the next generation.** The

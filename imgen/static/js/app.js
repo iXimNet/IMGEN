@@ -413,6 +413,9 @@
     renderFrameStrip();
     renderHistory();
     renderPresets();
+    // The negative library is bilingual in its term lists, so a language switch
+    // has to repaint which bundles read as applied and what they say.
+    renderNegPresets();
     renderModels();
     renderEnv();
     renderWeightsList();
@@ -1347,9 +1350,12 @@
      ====================================================================== */
   function closePops() {
     $("popPresets").classList.add("hidden");
+    $("popNeg").classList.add("hidden");
     $("popModel").classList.add("hidden");
     $("btnPresets").setAttribute("aria-expanded", "false");
     $("btnPresets").classList.remove("on");
+    $("btnNegPresets").setAttribute("aria-expanded", "false");
+    $("btnNegPresets").classList.remove("on");
     $("statusBtn").setAttribute("aria-expanded", "false");
     $("statusBtn").classList.remove("on");
   }
@@ -1506,6 +1512,143 @@
     const pool = presetPool().flatMap((cat) => cat.prompts || []);
     if (!pool.length) return;
     pickPreset(pool[Math.floor(Math.random() * pool.length)]);
+  }
+
+  /* ---- Negative presets -------------------------------------------------
+     A positive preset is a paragraph and replaces the field; a negative prompt
+     is a keyword list, so these bundles are additive instead. Clicking one
+     merges its terms into the field and clicking it again takes them back out.
+
+     That makes the on/off state *derived* rather than stored: it is recomputed
+     from the textarea on every repaint. Hand-typed terms therefore join in
+     without a second source of truth to drift out of sync. */
+  const negPool = () =>
+    (S.bootstrap && S.bootstrap.prompts && S.bootstrap.prompts.negative) || [];
+  /* Both languages ship their own term list — a short keyword list costs
+     nothing to translate, unlike the prose of the positive library. */
+  const negTitle = (bundle) => (S.lang === "zh" ? bundle.zh : bundle.en) || bundle.zh;
+  const negTerms = (bundle) => (S.lang === "zh" ? bundle.terms_zh : bundle.terms_en) || bundle.terms_zh || [];
+
+  /* The field is a list the user also types into, so split it the way a reader
+     would and compare term by term: "blurry," and "blurry" are one request, and
+     the original spelling has to survive a round trip. */
+  const negSegments = (text) =>
+    String(text || "")
+      .split(/[,，;；\n]/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+  const negKey = (term) => term.trim().toLowerCase();
+
+  /* Lit when every term of *either* language is already in the field, so a
+     bundle does not go dark just because the interface language changed. */
+  function negActive(bundle) {
+    const have = new Set(negSegments($("negative").value).map(negKey));
+    const covers = (terms) =>
+      Array.isArray(terms) && terms.length > 0 && terms.every((t) => have.has(negKey(t)));
+    return covers(bundle.terms_zh) || covers(bundle.terms_en);
+  }
+
+  function renderNegPresets() {
+    const list = $("negList");
+    if (!list) return;
+    const pool = negPool();
+    const on = pool.filter(negActive).length;
+    $("negCount").textContent = tfx("negCount", { on, n: pool.length });
+    list.innerHTML = "";
+    pool.forEach((bundle) => {
+      const lit = negActive(bundle);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = `pcard${lit ? " on" : ""}`;
+      btn.setAttribute("aria-pressed", lit ? "true" : "false");
+      btn.innerHTML = `<b>${esc(negTitle(bundle))}<span class="tick">${icon("i-check", 13)}</span></b><span>${esc(negTerms(bundle).join(", "))}</span>`;
+      // `renderNegPresets` rebuilds this list, so without stopping the event the
+      // target is detached by the time it bubbles to the outside-click rule.
+      btn.onclick = (event) => { event.stopPropagation(); toggleNegPreset(bundle); };
+      list.appendChild(btn);
+    });
+    // Clearing an empty field is a no-op, so the control says so instead.
+    $("negClear").disabled = !$("negative").value.trim();
+  }
+
+  /* One toggle has to work from either language's term list: a field filled in
+     Chinese then switched to English must still clear all of it. */
+  function toggleNegPreset(bundle) {
+    const remove = negActive(bundle);
+    const drop = new Set(
+      (bundle.terms_zh || []).concat(bundle.terms_en || []).map(negKey)
+    );
+    let parts = negSegments($("negative").value);
+    if (remove) {
+      parts = parts.filter((part) => !drop.has(negKey(part)));
+    } else {
+      const have = new Set(parts.map(negKey));
+      negTerms(bundle).forEach((term) => {
+        if (!have.has(negKey(term))) {
+          parts.push(term);
+          have.add(negKey(term));
+        }
+      });
+    }
+    $("negative").value = parts.join(", ");
+    renderNegPresets();
+  }
+
+  function clearNegative() {
+    $("negative").value = "";
+    renderNegPresets();
+  }
+
+  /* Anchored to the right of the panel, like the positive library, and for a
+     sharper reason: the trigger sits directly above the field it fills, so a
+     popover dropped underneath would cover that field. Watching the field fill
+     up is the entire feedback for a toggle.
+
+     Returns false when there is nowhere to put it — the caller then leaves the
+     popover shut rather than open and unanchored. */
+  function placeNeg() {
+    const pop = $("popNeg");
+    if (pop.classList.contains("hidden")) return false;
+    const appRect = $("app").getBoundingClientRect();
+    const btnRect = $("btnNegPresets").getBoundingClientRect();
+    const paneRect = $("composer").getBoundingClientRect();
+
+    if (isNarrow()) {
+      /* The panel is a bottom drawer here and it folds shut. A folded drawer has
+         no rect worth anchoring to — the popover would land off the bottom of
+         the window — so it goes away with the drawer. */
+      if (paneRect.height < 120) {
+        closePops();
+        return false;
+      }
+      pop.classList.remove("side-right");
+      pop.style.width = `${Math.round(paneRect.width - 20)}px`;
+      pop.style.left = `${Math.round(paneRect.left - appRect.left + 10)}px`;
+      pop.style.top = `${Math.round(paneRect.top - appRect.top + 14)}px`;
+      pop.style.maxHeight = `${Math.round(paneRect.height - 24)}px`;
+      return true;
+    }
+
+    pop.classList.add("side-right");
+    const width = 348;
+    let left = Math.round(paneRect.right - appRect.left) + 10;
+    if (left + width > appRect.width - 12) left = Math.max(8, appRect.width - 12 - width);
+
+    /* Measure first, then fit: the list is scrollable, so a popover that only
+       reads as complete at full height should get it when the window has room
+       rather than being pinned to the trigger and cut off at the bottom. */
+    pop.style.maxHeight = "";
+    const natural = pop.offsetHeight;
+    const bottom = appRect.height - 16;
+    let top = Math.round(btnRect.top - appRect.top) - 9;
+    if (top + natural > bottom) top = Math.max(58, bottom - natural);
+    pop.style.width = `${width}px`;
+    pop.style.left = `${left}px`;
+    pop.style.top = `${top}px`;
+    pop.style.maxHeight = `${Math.max(220, bottom - top)}px`;
+    const caret = Math.round(btnRect.top - appRect.top) + Math.round(btnRect.height / 2) - top - 4;
+    pop.style.setProperty("--carety", `${clamp(caret, 16, Math.max(16, (pop.offsetHeight || 320) - 24))}px`);
+    return true;
   }
 
   /* The dot reports health, not residency. An idle engine that has never
@@ -2578,6 +2721,12 @@
     $("modeEdit2").onclick = () => setMode("edit");
 
     $("prompt").addEventListener("input", renderValues);
+    // The negative toggles are derived from the field rather than stored, so a
+    // hand edit has to repaint them — otherwise typing the terms in by hand
+    // would leave the bundle that describes them sitting dark.
+    $("negative").addEventListener("input", () => {
+      if (!$("popNeg").classList.contains("hidden")) renderNegPresets();
+    });
 
     /* Presets popover. Both the toolbar button and the empty-stage card open it,
        and they share one handler rather than the card forwarding a `.click()` to
@@ -2606,6 +2755,24 @@
     $("presetSearch").addEventListener("input", renderPresets);
     $("presetSearch").onclick = (event) => event.stopPropagation();
     $("presetLucky").onclick = (event) => { event.stopPropagation(); randomPreset(); };
+
+    /* Negative-preset popover. Unlike the positive library this one stays open
+       across picks — the whole point is combining several bundles, and a
+       popover that closed on every click would make that a chore. */
+    $("btnNegPresets").onclick = (event) => {
+      if (event) event.stopPropagation();
+      const pop = $("popNeg");
+      if (!pop.classList.contains("hidden")) return closePops();
+      closePops();
+      renderNegPresets();
+      pop.classList.remove("hidden");
+      // Not every panel state can host the popover (a folded drawer cannot), and
+      // `placeNeg` shuts it again in that case rather than leaving it stranded.
+      if (!placeNeg()) return;
+      $("btnNegPresets").setAttribute("aria-expanded", "true");
+      $("btnNegPresets").classList.add("on");
+    };
+    $("negClear").onclick = (event) => { event.stopPropagation(); clearNegative(); };
 
     /* Category strip: chevrons, wheel-to-scroll, and the wheel must not steal
        the scroll once the strip has hit either end. */
@@ -2757,6 +2924,10 @@
     /* Advanced */
     $("btnAdv").onclick = () => {
       const opening = $("advBody").classList.contains("hidden");
+      // The negative-preset popover is anchored to a button inside this block,
+      // so collapsing the block has to take the popover with it or it would
+      // float over the panel pointing at nothing.
+      if (!opening) closePops();
       $("advBody").classList.toggle("hidden", !opening);
       $("btnAdv").setAttribute("aria-expanded", opening ? "true" : "false");
       $("btnAdv").querySelector("span").textContent = opening ? tr("collapse") : tr("expand");
@@ -2846,9 +3017,13 @@
     /* Popovers close on an outside click. The DOM guard matters: a handler that
        rebuilds a list detaches the event target before it reaches this point. */
     document.addEventListener("click", (event) => {
-      if ($("popPresets").classList.contains("hidden") && $("popModel").classList.contains("hidden")) return;
+      if (
+        $("popPresets").classList.contains("hidden") &&
+        $("popNeg").classList.contains("hidden") &&
+        $("popModel").classList.contains("hidden")
+      ) return;
       if (!document.contains(event.target)) return;
-      if (event.target.closest(".pop") || event.target.closest("#btnPresets") || event.target.closest("#statusBtn")) return;
+      if (event.target.closest(".pop") || event.target.closest("#btnPresets") || event.target.closest("#btnNegPresets") || event.target.closest("#statusBtn")) return;
       closePops();
     });
 
@@ -2862,7 +3037,7 @@
         if (!$("detail").classList.contains("hidden")) return closeDetail();
         if (!$("settings").classList.contains("hidden")) return closeSettings();
         if (!$("firstRun").classList.contains("hidden")) return;
-        if (!$("popPresets").classList.contains("hidden") || !$("popModel").classList.contains("hidden")) return closePops();
+        if (!$("popPresets").classList.contains("hidden") || !$("popNeg").classList.contains("hidden") || !$("popModel").classList.contains("hidden")) return closePops();
         return;
       }
       if (!$("detail").classList.contains("hidden")) {
@@ -2875,12 +3050,16 @@
       canvasZoom.resize();
       detailZoom.resize();
       placePresets();
+      placeNeg();
       updateCatNav();
       if (!$("popModel").classList.contains("hidden")) placeBelow($("popModel"), $("statusBtn"));
     });
     narrow.addEventListener("change", () => {
       $("app").classList.remove("composer-open");
       $("btnComposer").classList.remove("on");
+      // Crossing the breakpoint folds the drawer, and every popover is anchored
+      // to something inside it — they have to go with it.
+      closePops();
       placePresets();
       canvasZoom.resize();
     });

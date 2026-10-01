@@ -742,5 +742,170 @@
         }
       ]
     }
+  ],
+  "negative": [
+    {
+      "id": "baseline",
+      "zh": "基础兜底",
+      "en": "Baseline",
+      "terms_zh": [
+        "低质量",
+        "模糊",
+        "畸变",
+        "变形",
+        "水印",
+        "多余肢体",
+        "多余文字"
+      ],
+      "terms_en": [
+        "low quality",
+        "blurry",
+        "distorted",
+        "deformed",
+        "watermark",
+        "extra limbs",
+        "extra text"
+      ]
+    },
+    {
+      "id": "quality",
+      "zh": "画质",
+      "en": "Image quality",
+      "terms_zh": [
+        "噪点",
+        "颗粒感",
+        "过度锐化",
+        "过饱和",
+        "塑料感",
+        "蜡像感",
+        "过度磨皮"
+      ],
+      "terms_en": [
+        "noise",
+        "grainy",
+        "oversharpened",
+        "oversaturated",
+        "plastic look",
+        "waxy skin",
+        "over-smoothed skin"
+      ]
+    },
+    {
+      "id": "anatomy",
+      "zh": "人体结构",
+      "en": "Anatomy",
+      "terms_zh": [
+        "多余手指",
+        "手指畸形",
+        "缺指",
+        "多余手臂",
+        "多余腿",
+        "肢体残缺",
+        "关节扭曲",
+        "比例失调",
+        "面部扭曲"
+      ],
+      "terms_en": [
+        "extra fingers",
+        "malformed hands",
+        "missing fingers",
+        "extra arms",
+        "extra legs",
+        "amputated limbs",
+        "twisted joints",
+        "bad proportions",
+        "distorted face"
+      ]
+    },
+    {
+      "id": "marks",
+      "zh": "文字与标志",
+      "en": "Text & marks",
+      "terms_zh": [
+        "文字",
+        "签名",
+        "标志",
+        "二维码",
+        "日期戳",
+        "字幕",
+        "边框"
+      ],
+      "terms_en": [
+        "text",
+        "signature",
+        "logo",
+        "qr code",
+        "date stamp",
+        "caption",
+        "border"
+      ]
+    },
+    {
+      "id": "artifact",
+      "zh": "AI 感与伪影",
+      "en": "AI artifacts",
+      "terms_zh": [
+        "AI 感",
+        "拼接痕迹",
+        "重复元素",
+        "鬼影",
+        "色带",
+        "摩尔纹",
+        "压缩伪影"
+      ],
+      "terms_en": [
+        "ai-generated look",
+        "visible seams",
+        "repeating patterns",
+        "ghosting",
+        "banding",
+        "moire",
+        "compression artifacts"
+      ]
+    },
+    {
+      "id": "framing",
+      "zh": "构图问题",
+      "en": "Framing",
+      "terms_zh": [
+        "裁切突兀",
+        "主体出画",
+        "构图混乱",
+        "杂乱背景",
+        "多余物体",
+        "头部被裁切"
+      ],
+      "terms_en": [
+        "awkward crop",
+        "subject out of frame",
+        "cluttered composition",
+        "messy background",
+        "stray objects",
+        "cut-off head"
+      ]
+    },
+    {
+      "id": "style",
+      "zh": "风格跑偏",
+      "en": "Style drift",
+      "terms_zh": [
+        "卡通",
+        "插画",
+        "3D 渲染",
+        "动漫",
+        "油画",
+        "素描",
+        "低多边形"
+      ],
+      "terms_en": [
+        "cartoon",
+        "illustration",
+        "3d render",
+        "anime",
+        "oil painting",
+        "sketch",
+        "low-poly"
+      ]
+    }
   ]
 }
