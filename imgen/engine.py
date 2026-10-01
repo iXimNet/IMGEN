@@ -27,6 +27,22 @@ from .sizes import follow_reference_size, output_resolution_for, size_for
 ProgressFn = Callable[[dict], None]
 
 
+# Image21-INT8 is ~18.6 GB of weights. A card needs working room on top of them
+# to hold the encoder and transformer resident next to a 2K step's latents and
+# activations — the same ~7 GB the BF16 path reserves (its 40 GB threshold
+# minus 33.1 GB of weights). Below that the components are streamed module by
+# module instead, which is slower but fits.
+INT8_RESIDENT_HEADROOM_GB = 7.0
+
+# Conditioning cost is driven by the reference workload, not just the recipe:
+# the pipeline resizes every reference to the output-resolution *area*, so a 2K
+# edit hands the vision tower about four times the pixels of a 1K one. Measured
+# on the INT8 path (2 references, CFG 4.0, weights resident): 1K → 3.1s, 2K →
+# over two minutes. The threshold is the geometric midpoint of those two
+# points, so the flag errs towards announcing a stage the reader will wait on.
+SLOW_CONDITION_MEGAPIXELS = 4.0
+
+
 def resolve_vae_tiling(vae_tiling) -> bool:
     """Tiling is a VRAM tradeoff, never a quality win, so it stays opt-in.
 
@@ -234,8 +250,10 @@ class Engine:
                 return self._loaded
             callback({"type": "load_start", "model_key": model_key, "path": str(path)})
             if spec["loader"] == "int8":
-                pipe = self._load_int8(path, callback)
-                offload = True
+                offload = self._should_offload_int8()
+                if offload:
+                    callback({"type": "load_stage", "stage": "cpu_offload"})
+                pipe = self._load_int8(path, callback, offload=offload)
             elif spec["loader"] == "int4":
                 pipe = self._load_int4(path, callback)
                 offload = pipe.image21_runtime["offload"] != "resident"
@@ -268,6 +286,28 @@ class Engine:
         vram = self.device_info.get("vram_gb") or 0
         return vram < 40
 
+    def _should_offload_int8(self) -> bool:
+        """INT8 keeps its weights on the card when they fit.
+
+        ``enable_model_cpu_offload()`` hands every module to the accelerator for
+        its turn and takes it back afterwards, so a card that can simply hold
+        the ~18.6 GB of INT8 weights pays a per-module copy for nothing. Only a
+        card that cannot fit them alongside a 2K step's working set streams
+        them. bitsandbytes INT8 is CUDA-only, and ``_load`` refuses other
+        devices before reaching here, so a non-CUDA answer is never used.
+
+        The floor mirrors the BF16 path's own headroom (40 GB threshold −
+        33.1 GB of weights): the same ~7 GB of activation room, applied to a
+        smaller weight footprint. On the common cards this means a 32 GB or
+        larger accelerator keeps the weights and a 24 GB one streams them.
+        """
+        device = self.device_info.get("device")
+        if device != "cuda":
+            return False
+        vram = self.device_info.get("vram_gb") or 0
+        floor = MODELS["image21-int8"]["approx_gb"] + INT8_RESIDENT_HEADROOM_GB
+        return vram < floor
+
     def _load_bf16(self, path, callback: ProgressFn):
         import torch
         from diffusers import QwenImage21Pipeline
@@ -282,7 +322,7 @@ class Engine:
             )
         return pipe
 
-    def _load_int8(self, path, callback: ProgressFn):
+    def _load_int8(self, path, callback: ProgressFn, offload: bool = True):
         from .int8_runtime import load_int8_pipeline
 
         callback({"type": "load_stage", "stage": "int8_sequential"})
@@ -293,7 +333,23 @@ class Engine:
                 "This is expected and not an error.",
             }
         )
-        return load_int8_pipeline(str(path), local_files_only=True)
+        callback(
+            {
+                "type": "log",
+                "message": (
+                    "Image21-INT8: weights stay resident on the accelerator."
+                    if not offload
+                    else "Image21-INT8: low-VRAM mode streams each module to the "
+                    "accelerator for its turn."
+                ),
+            }
+        )
+        return load_int8_pipeline(
+            str(path),
+            device=self.device_info.get("device") or "cuda",
+            offload=offload,
+            local_files_only=True,
+        )
 
     def _load_int4(self, path, callback: ProgressFn):
         from .int4_runtime import load_int4_pipeline
@@ -508,15 +564,39 @@ class Engine:
         """Same question for the encode direction (edit runs encode references)."""
         return self._cpu_vae("encode")
 
-    def _group_offload(self) -> bool:
-        """True when the pipeline streams weights leaf/block by leaf/block.
+    def _slow_condition(
+        self, refs: list[Image.Image] | None = None, output_resolution: int = 0
+    ) -> bool:
+        """True when the conditioning pass is expected to take a long time.
 
-        That is the small-card INT4 recipe, and it is what makes the
-        conditioning stretch — a whole vision tower read back through an
-        offloaded encoder — slow enough to be worth announcing.
+        Two separate things make the prompt + reference encode long, and only
+        announcing the first one is what let a two-minute stage look silent:
+
+        * **Streamed weights.** INT4 group offload reads the whole vision tower
+          back leaf by leaf; an offloaded INT8 encoder pulls each quantized
+          matmul's weight over for its turn. A 2K edit sat here for 19 minutes
+          that way. With the weights resident the same pass is seconds.
+        * **A large reference workload.** The pipeline resizes every reference
+          to the output-resolution area, so 2K is roughly four times the vision
+          tokens of 1K — and the cost grows faster than the token count. Two 1K
+          references conditioned in 3.1s; the same two at 2K ran past two
+          minutes even with the weights resident.
+
+        This used to be ``_group_offload()``, which knew only the INT4 path and
+        reported an offloaded INT8 run as fast while it was the one genuinely
+        stuck.
         """
         loaded, runtime = self._runtime()
-        return loaded.get("loader") == "int4" and runtime.get("offload") == "group"
+        loader = loaded.get("loader")
+        if loader == "int4" and runtime.get("offload") == "group":
+            return True
+        if loader == "int8" and loaded.get("cpu_offload"):
+            return True
+        if not refs:
+            # A text-only prompt never runs the vision tower.
+            return False
+        area = max(1, int(output_resolution or 0)) ** 2
+        return len(refs) * area >= SLOW_CONDITION_MEGAPIXELS * 1_000_000
 
     def _run_pipe(
         self,
@@ -588,7 +668,7 @@ class Engine:
                 "name": "encode_prompt",
                 "label": "prompt and reference encoding",
                 "where": str(self.device_info.get("device") or "cpu"),
-                "slow": self._group_offload(),
+                "slow": self._slow_condition(images, output_resolution),
             },
             "encode": {
                 "owner": pipe,

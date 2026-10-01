@@ -80,7 +80,7 @@ class _FullPipe:
         return type("Result", (), {"images": [Image.new("RGB", (8, 8))]})()
 
 
-def _run(engine, pipe, events):
+def _run(engine, pipe, events, *, images=None, output_resolution=0):
     def callback(event):
         events.append(event)
 
@@ -88,10 +88,10 @@ def _run(engine, pipe, events):
         pipe,
         prompt="p",
         negative_prompt=None,
-        images=None,
+        images=images,
         width=64,
         height=64,
-        output_resolution=0,
+        output_resolution=output_resolution,
         steps=2,
         cfg=1.0,
         seed=1,
@@ -140,6 +140,65 @@ def test_run_pipe_flags_cpu_decode_and_preserves_instance_override():
     # The borrowed instance-level wrapper survived the run untouched.
     assert vars(vae)["decode"] is cpu_decode
     assert vae.decode("x") == "cpu-decoded"
+
+
+@pytest.mark.parametrize("cpu_offload,expected", [(True, True), (False, False)])
+def test_int8_conditioning_follows_the_weight_placement(cpu_offload, expected):
+    """An offloaded INT8 edit sat 19 minutes in the condition stage while the
+    studio reported it as fast: the flag only recognised INT4 group offload.
+    But precision must not decide it either — what is slow is the streaming."""
+    engine = Engine(demo=True)
+    engine._loaded = {"loader": "int8", "cpu_offload": cpu_offload}
+    events = []
+
+    _run(engine, _FullPipe(_ClassVae()), events)
+
+    phases = [e for e in events if e["type"] == "generate_phase"]
+    assert [p["slow"] for p in phases if p["phase"] == "condition"] == [expected]
+    # Neither VAE direction streams for this loader.
+    assert [p["slow"] for p in phases if p["phase"] != "condition"] == [False, False]
+
+
+@pytest.mark.parametrize("resolution,expected", [(1024, False), (2048, True)])
+def test_a_large_reference_workload_is_announced_as_slow(resolution, expected):
+    """Streaming is not the only reason conditioning runs long. The pipeline
+    sizes each reference to the output-resolution area, so a 2K edit gives the
+    vision tower ~4x the pixels of a 1K one and takes minutes even with the
+    weights resident (measured: 3.1s at 1K, past two minutes at 2K). Announcing
+    only the streaming case left exactly that 2K run looking wedged.
+    """
+    engine = Engine(demo=True)
+    events = []
+    refs = [Image.new("RGB", (64, 64)) for _ in range(2)]
+
+    _run(engine, _FullPipe(_ClassVae()), events, images=refs, output_resolution=resolution)
+
+    phases = [e for e in events if e["type"] == "generate_phase"]
+    assert [p["slow"] for p in phases if p["phase"] == "condition"] == [expected]
+
+
+def test_a_text_only_prompt_is_never_slow_in_conditioning():
+    """Generation has no vision tower to run, whatever the resolution."""
+    engine = Engine(demo=True)
+    events = []
+
+    _run(engine, _FullPipe(_ClassVae()), events, output_resolution=2048)
+
+    phases = [e for e in events if e["type"] == "generate_phase"]
+    assert [p["slow"] for p in phases if p["phase"] == "condition"] == [False]
+
+
+def test_int4_model_offload_keeps_conditioning_fast():
+    """Only the group-offload INT4 recipe streams the vision tower; model
+    offload moves a whole module at a time, so conditioning stays quick."""
+    engine = Engine(demo=True)
+    engine._loaded = {"loader": "int4", "runtime": {"offload": "model"}}
+    events = []
+
+    _run(engine, _FullPipe(_ClassVae()), events)
+
+    phases = [e for e in events if e["type"] == "generate_phase"]
+    assert [p["slow"] for p in phases if p["phase"] == "condition"] == [False]
 
 
 def test_demo_engine_walks_every_stage_in_order():

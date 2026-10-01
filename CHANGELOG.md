@@ -215,6 +215,24 @@ server — see **Multi-image runs** below.
   picture offers no toggle — there is nothing to look at — but if one is reached
   by walking the history *while filled*, the toggle stays: it is the only way
   back to the panel.
+- **The detail panel is no longer stretched by its own widest row.** In English
+  the footer's three labels ask for 398px inside a 360px panel, and the panel's
+  single grid column was implicit — an `auto` track, which is sized by the
+  widest row. The track grew to 398, and because every row stretches to the
+  track, the metadata cards came with it: they ended 20px past the panel's right
+  edge, having spent their right padding, so the right-hand column of values sat
+  flush against the cut and the last button was sliced by the sheet's
+  `overflow: hidden`. The column is now declared (`minmax(0, 1fr)`), so a row
+  that does not fit overflows on its own instead of dragging its siblings out
+  with it — cards measure 324px again, with both paddings intact.
+- The footer's two picture actions (`Reuse settings`, `Send to edit`) are now
+  one flex item, so when the labels cannot share the row with `Delete` they move
+  to a second row **together**, right-aligned, instead of the last one being cut
+  off. Half a row beats half a button. The second row is only spent when the
+  words need it: Chinese fits on one line and still renders as one row, and the
+  panel's `1fr` body absorbs the extra 41px, so the picture loses nothing.
+  Verified in a real browser at 960/1024/1280 wide in both languages, plus the
+  narrow layout, the delete confirmation, a four-frame record and fill-the-window.
 
 ### Top bar
 - **New brand mark: an aperture ring around a glowing safelight core.** The old
@@ -378,6 +396,38 @@ server — see **Multi-image runs** below.
   drawer leaves it nothing to anchor to.
 
 ### Fixes
+- **An INT8 run stuck for minutes in conditioning was reported as fast.** The
+  "expected to be slow" flag on the `condition` stage was `_group_offload()`,
+  which only recognises the INT4 group-offload recipe, so the run that prompted
+  this — an INT8 2K edit that sat there for 19 minutes — showed a silent bar.
+  Two independent things make that stage long, and the flag now knows both:
+  weights being **streamed** (INT4 group offload, or an INT8 pipeline loaded
+  with CPU offload) and a **large reference workload**. The second one turned
+  out to be the dominant cost and is not about precision at all: the pipeline
+  resizes every reference to the output-resolution *area*, so a 2K edit gives
+  the vision tower roughly four times the pixels of a 1K one, and the cost grows
+  faster than the token count. Measured on the INT8 path with the weights
+  resident and two references: **3.1s at 1K, over 8 minutes at 2K**. The
+  threshold sits at the geometric midpoint of those two points (4 megapixels of
+  reference area), so the flag errs towards announcing a stage the reader will
+  actually wait on. Generation is never flagged here — a text-only prompt never
+  runs the vision tower. The note text gained the large-reference case, since it
+  previously named low-VRAM streaming only.
+- **Image21-INT8 forced CPU offload on every machine.** `_load` hard-coded
+  `offload = True` for the INT8 loader, so `enable_model_cpu_offload()` handed
+  every module to the accelerator for its turn and took it back afterwards —
+  even on a card that can hold the ~18.6 GB of weights outright, where the
+  copies buy nothing but the streaming that made conditioning slow in the first
+  place. INT4 has chosen its placement from the card's VRAM since it was
+  written; INT8 now does the same. The floor is the BF16 path's own headroom
+  (~7 GB above the weights, i.e. 25.6 GB here), so a 24 GB card still streams
+  and a 32 GB card keeps the weights resident. Verified on a 32 GB RTX 5090:
+  `cpu_offload: false`, ~19 GB on the card, 20s to load, and a 1K two-reference
+  edit whose conditioning took 3.1s. The sequential load is unchanged — that
+  guards the *transient* peak, which is a separate question. Note that this does
+  **not** rescue 2K: conditioning there is minutes long either way, so a 2K edit
+  is still best run on BF16 (or at `true_cfg_scale=1.0`, which halves the encode
+  by turning off the negative-prompt pass).
 - **"送到改图" also overwrote the prompt.** The button was meant to put the
   picture on screen into the edit panel as a reference image, and it did — but
   `sendToEdit` then ran `if (prompt) $("prompt").value = prompt`, replacing

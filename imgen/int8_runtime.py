@@ -115,8 +115,26 @@ def enable_int8_cpu_offload(pipe):
     pipe.enable_model_cpu_offload()
 
 
-def load_int8_pipeline(model, local_files_only=False):
-    """Load/offload components sequentially to avoid a combined CUDA load peak."""
+def move_int8_to_device(pipe, device):
+    """Keep the quantized components resident on the accelerator.
+
+    ``patch_int8_device_moves()`` has already taught every Linear8bitLt layer to
+    carry its CB/SCB alias and outlier state through a parent ``Module.to()``,
+    so the plain move below is enough. A card with room for the weights does not
+    need the per-module copy that ``enable_model_cpu_offload()`` pays on every
+    turn.
+    """
+    pipe.to(device)
+
+
+def load_int8_pipeline(model, *, device=None, offload=True, local_files_only=False):
+    """Load components sequentially to avoid a combined CUDA load peak.
+
+    ``offload`` chooses the steady state: True hands each module to the
+    accelerator for its turn (small cards), False keeps the ~18.6 GB of INT8
+    weights resident (a card that can hold them). The sequential load is about
+    the *transient* peak either way.
+    """
     import torch
     from diffusers import QwenImage21Pipeline, QwenImage21Transformer2DModel
     from transformers import Qwen3VLForConditionalGeneration
@@ -146,5 +164,10 @@ def load_int8_pipeline(model, local_files_only=False):
         local_files_only=local_files_only,
         **components,
     )
-    enable_int8_cpu_offload(pipe)
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    if offload:
+        enable_int8_cpu_offload(pipe)
+    else:
+        move_int8_to_device(pipe, device)
     return pipe
