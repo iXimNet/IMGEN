@@ -1223,13 +1223,19 @@
 
   function renderDetailFooter(item) {
     // Delete is destructive and acts on the record; the other two act on the
-    // picture. So they get one row with delete pushed to the left edge and a
-    // gap it does not share with the pair.
+    // picture. It keeps its trash glyph and drops the word from the button: the
+    // glyph is read on its own, and the word was the only thing pushing the
+    // English footer past the panel — three labels ask for 358px where the
+    // panel has 328. What the eye loses `title` says on hover and `aria-label`
+    // says to a screen reader, so the button is never unlabelled.
+    // The pair is one element so the footer can still move it whole if the
+    // words ever outgrow the panel: half a row beats half a button.
     $("dFoot").innerHTML =
-      `<button type="button" class="btn danger" id="dDelete">${icon("i-trash")}<span class="lbl">${esc(tr("delete"))}</span></button>` +
-      `<span class="grow"></span>` +
-      `<button type="button" class="btn" id="dReuse">${icon("i-reuse")}<span class="lbl">${esc(tr("reuse"))}</span></button>` +
-      `<button type="button" class="btn" id="dSend">${icon("i-send")}<span class="lbl">${esc(tr("sendEdit"))}</span></button>`;
+      `<button type="button" class="btn danger" id="dDelete" title="${esc(tr("delete"))}" aria-label="${esc(tr("delete"))}">${icon("i-trash")}</button>` +
+      `<span class="foot-pair">` +
+        `<button type="button" class="btn" id="dReuse" aria-label="${esc(tr("reuse"))}">${icon("i-reuse")}<span class="lbl">${esc(tr("reuse"))}</span></button>` +
+        `<button type="button" class="btn" id="dSend" aria-label="${esc(tr("sendEdit"))}">${icon("i-send")}<span class="lbl">${esc(tr("sendEdit"))}</span></button>` +
+      `</span>`;
     const hasImage = !!item.image_url;
     $("dReuse").onclick = () => { closeDetail(); applyItemParams(item); };
     $("dSend").onclick = () => { if (hasImage) { closeDetail(); sendToEdit(detailFrame().url || item.image_url); } };

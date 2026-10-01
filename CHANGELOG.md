@@ -215,24 +215,34 @@ server — see **Multi-image runs** below.
   picture offers no toggle — there is nothing to look at — but if one is reached
   by walking the history *while filled*, the toggle stays: it is the only way
   back to the panel.
-- **The detail panel is no longer stretched by its own widest row.** In English
-  the footer's three labels ask for 398px inside a 360px panel, and the panel's
-  single grid column was implicit — an `auto` track, which is sized by the
-  widest row. The track grew to 398, and because every row stretches to the
-  track, the metadata cards came with it: they ended 20px past the panel's right
-  edge, having spent their right padding, so the right-hand column of values sat
-  flush against the cut and the last button was sliced by the sheet's
-  `overflow: hidden`. The column is now declared (`minmax(0, 1fr)`), so a row
-  that does not fit overflows on its own instead of dragging its siblings out
-  with it — cards measure 324px again, with both paddings intact.
-- The footer's two picture actions (`Reuse settings`, `Send to edit`) are now
-  one flex item, so when the labels cannot share the row with `Delete` they move
-  to a second row **together**, right-aligned, instead of the last one being cut
-  off. Half a row beats half a button. The second row is only spent when the
-  words need it: Chinese fits on one line and still renders as one row, and the
-  panel's `1fr` body absorbs the extra 41px, so the picture loses nothing.
-  Verified in a real browser at 960/1024/1280 wide in both languages, plus the
-  narrow layout, the delete confirmation, a four-frame record and fill-the-window.
+- **The detail panel is no longer stretched by its own widest row.** The panel's
+  single grid column was implicit — an `auto` track, which is sized by its
+  widest row; in English it measured 398.188px against a 360px panel. Because
+  every row stretches to the track, the metadata cards came with it: they ended
+  20px past the panel's right edge, having spent their right padding, so the
+  right-hand column of values sat flush against the cut and the last button was
+  sliced by the sheet's `overflow: hidden`. The column is now declared
+  (`minmax(0, 1fr)`), so a row that does not fit overflows on its own instead of
+  dragging its siblings out with it — cards measure 324px again, both paddings
+  intact. The footer could not have escaped on its own: its three English labels
+  ask for 358px of `nowrap` text inside the panel's 328px content box.
+- **The trash button carries its glyph alone.** Three labelled buttons cannot
+  share the English footer, and wrapping them onto a second row fixed the
+  clipping but read heavier than the Chinese footer, which is one clean row. The
+  word was what cost the room — measured, the three labels ask for 358.19px in a
+  328px box, and dropping "Delete" brings that to 314.11px, so both languages
+  now render a single row. The glyph is read on its own and the destructive
+  action is the one that least needs to shout; the word is not lost, only moved
+  out of the paint — `title` shows it on hover and `aria-label` gives it to a
+  screen reader. Removing the label also removes the line box that sets the
+  button's height, so the danger button stretches to its neighbours' height
+  (`align-self: stretch`) rather than sitting 3px inset; that holds at the narrow
+  breakpoint too, where every footer button drops its label and grows to 34px.
+  The two picture actions still wrap as one right-aligned pair if the words ever
+  outgrow the panel.
+  Verified in a real browser at 960/1024/1280/1440 wide in both languages, plus
+  the narrow layout, the delete confirmation, a four-frame record and
+  fill-the-window.
 
 ### Top bar
 - **New brand mark: an aperture ring around a glowing safelight core.** The old

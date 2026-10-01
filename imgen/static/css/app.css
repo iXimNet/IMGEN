@@ -648,16 +648,34 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; ma
 .vmain { flex: 1; min-height: 0; min-width: 0; position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 .vmain > .viewport { grid-area: 1 / 1; padding: 16px; }
 /* The panel owns its own header, scroller and foot, so it can stay put while
-   the metadata scrolls. */
-.dpanel { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; background: var(--surface); }
+   the metadata scrolls.
+   Its single column is declared rather than left implicit, because an implicit
+   `auto` track is sized by the widest row: the English footer asks for 398px of
+   buttons inside a 360px panel, so the track grew to 398 and every row
+   stretched with it — the metadata cards ended 20px past the panel's right edge
+   with their right padding spent, and the footer's last button was sliced by
+   the sheet. Pinning the column to the panel's own width means a row that does
+   not fit overflows on its own instead of dragging the other rows out with it. */
+.dpanel { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; background: var(--surface); }
 .dpanel-head { display: flex; align-items: center; gap: 4px; padding: 10px 10px 10px 18px; border-bottom: 1px solid var(--line); min-width: 0; }
 .dpanel-head h3 { font-size: 15px; font-weight: 600; margin: 0; flex: none; letter-spacing: 0.01em; }
 .dpanel-body { min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 14px 18px 16px; }
-.dpanel-foot { display: flex; align-items: center; gap: 8px; padding: 11px 16px; border-top: 1px solid var(--line); background: rgba(0, 0, 0, 0.16); }
+.dpanel-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 11px 16px; border-top: 1px solid var(--line); background: rgba(0, 0, 0, 0.16); }
 /* Delete stands apart from the two actions that act on the picture: it is the
-   destructive one, so it gets the left edge and a gap it does not share. */
-.dpanel-foot .btn.danger { margin-right: 12px; }
-.dpanel-foot .grow { flex: 1; }
+   destructive one, so it gets the left edge and a gap it does not share. It
+   also carries its glyph alone — the word "Delete" is what made the English
+   footer ask for 358px of `nowrap` text where its box has 328, and the trash
+   can is read without it.
+   Dropping the label costs the button the label's line box, which is what gives
+   its neighbours their height, so it stretches to the row's height instead of
+   sitting 3px inset; that also holds at the narrow breakpoint, where every
+   footer button loses its label and grows to 34px. */
+.dpanel-foot .btn.danger { margin-right: 12px; align-self: stretch; }
+/* The two actions that act on the picture travel as one item, so if their words
+   ever outgrow the panel they wrap as one item, still on the right edge — half a
+   row beats half a button. `margin-left:auto` is what holds the pair right, so
+   the footer needs no spacer element to do the same job. */
+.foot-pair { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 /* A record with no picture (failed / cancelled): say so instead of showing a
    stale image from the previous record. */
 .dempty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; text-align: center; pointer-events: none; }
