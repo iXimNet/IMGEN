@@ -1,4 +1,5 @@
 import json
+import re
 import time
 from io import BytesIO
 
@@ -289,6 +290,62 @@ def test_a_generate_run_ignores_reference_uploads(client):
     gated = js[js.index('if (S.mode === "edit") {'):]
     gated = gated[: gated.index("return fd;")]
     assert 'fd.append("files"' in gated, "the append must sit inside the guard"
+
+
+def test_send_to_edit_adds_a_reference_and_leaves_the_prompt_alone(client):
+    """送到改图 must send a picture, not a prompt.
+
+    The button used to run `if (prompt) $("prompt").value = prompt` after adding
+    the reference, so opening a record's detail and sending its picture silently
+    replaced whatever the user had typed — no confirmation, no undo, and the
+    toast never mentioned it. It read "已作为参考图送到改图 / 在提示词里用「第一张图」
+    指代它", i.e. it told the user to name the image themselves while the box had
+    already been filled in.
+
+    Restoring a record's prompt is what 复用参数 (`applyItemParams`) is for, and
+    that one restores the negative prompt too. So the rule enforced here is that
+    the box is not touched at all — the wrong half of a settings restore is worse
+    than none of it.
+
+    The behaviour lives in the DOM, which these tests do not drive; the contract
+    is asserted against the source, the same way the mode gate above is.
+    """
+    js = client.get("/js/app.js").text
+
+    assert "async function sendToEdit(url) {" in js, (
+        "sendToEdit must take the picture url and nothing else"
+    )
+
+    body = js[js.index("async function sendToEdit(url) {"):]
+    body = body[: body.index('toast("ok", tr("toastToEdit")')]
+    assert '$("prompt")' not in body, "sendToEdit must not write the prompt box"
+    assert "$(\"negative\")" not in body, "nor the negative prompt"
+    # It still has to do the one thing it does.
+    assert "addFiles(" in body, "the reference image is the whole point"
+
+
+def test_send_to_edit_callers_pass_only_the_url(client):
+    """Both call sites agree on the new signature.
+
+    They did not agree before: the detail footer passed `item.prompt` while the
+    stage toolbar passed `null`, so the same button meant two different things
+    depending on where it was clicked. That asymmetry is what surfaced the bug,
+    and it must not come back.
+    """
+    js = client.get("/js/app.js").text
+
+    call = js[js.index("sendToEdit(detailFrame()"):]
+    assert call.startswith("sendToEdit(detailFrame().url || item.image_url);"), (
+        "the detail footer sends the picture on screen, and nothing else"
+    )
+    assert "sendToEdit(S.currentImage);" in js, (
+        "the stage toolbar sends the canvas picture, and nothing else"
+    )
+    # Nothing anywhere may hand it a second argument again.
+    calls = re.findall(r"sendToEdit\(([^;]*?)\);", js)
+    assert calls, "the call sites must still be findable"
+    offenders = [c for c in calls if "," in c]
+    assert not offenders, f"sendToEdit takes one argument; got {offenders}"
 
 
 def test_jobs_never_expose_local_paths(client):

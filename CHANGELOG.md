@@ -378,6 +378,22 @@ server — see **Multi-image runs** below.
   drawer leaves it nothing to anchor to.
 
 ### Fixes
+- **"送到改图" also overwrote the prompt.** The button was meant to put the
+  picture on screen into the edit panel as a reference image, and it did — but
+  `sendToEdit` then ran `if (prompt) $("prompt").value = prompt`, replacing
+  whatever the user had typed with the source record's own prompt. Silently: no
+  confirmation, no undo, and the toast said only "已作为参考图送到改图", which
+  told the user to name the image themselves while the box had already been
+  filled in. The replacement persisted too — parking a mode on the way out
+  captures the box as it stands — so a draft was gone for good. The two call
+  sites disagreed about it, which is what gave the bug away: the detail footer
+  passed `item.prompt` while the stage toolbar passed `null`, so the same button
+  meant two different things depending on where it was clicked. Sending a
+  picture is now sending a picture and nothing else; the prompt box is left
+  alone. Restoring a record's prompt is what 复用参数 is for, and it restores the
+  negative prompt with it — carrying over half of a settings restore was worse
+  than carrying over none of it. Asserted from the source in the tests, since
+  the behaviour lives in the DOM.
 - **A reference image picked for an edit leaked into the next generation.** The
   panel keeps `S.refs` across a mode switch — rightly, since a reference the user
   just chose should survive a trip through 生图, and `sendToEdit` sets the mode

@@ -1232,7 +1232,7 @@
       `<button type="button" class="btn" id="dSend">${icon("i-send")}<span class="lbl">${esc(tr("sendEdit"))}</span></button>`;
     const hasImage = !!item.image_url;
     $("dReuse").onclick = () => { closeDetail(); applyItemParams(item); };
-    $("dSend").onclick = () => { if (hasImage) { closeDetail(); sendToEdit(detailFrame().url || item.image_url, item.prompt); } };
+    $("dSend").onclick = () => { if (hasImage) { closeDetail(); sendToEdit(detailFrame().url || item.image_url); } };
     $("dDelete").onclick = () => askDelete(item);
     // A record with no picture (failed or cancelled) has nothing to send, so the
     // control is genuinely disabled — not merely dimmed, or it stays focusable
@@ -1330,7 +1330,14 @@
     if (next && next.id !== S.detailId) openDetail(next);
   }
 
-  async function sendToEdit(url, prompt) {
+  /* Sending a picture is sending a picture: it adds one reference image and
+     nothing else. It deliberately does *not* touch `#prompt` — the box belongs
+     to whoever is typing in it, and a run's own prompt is a click away through
+     复用参数 (`applyItemParams`), which is the control that owns restoring a
+     record's settings. Seeding the prompt here used to overwrite a draft
+     silently, with no confirmation and no undo, while the toast said only
+     "sent as a reference" and told the user to name it themselves. */
+  async function sendToEdit(url) {
     if (!url) return;
     setMode("edit");
     try {
@@ -1340,7 +1347,6 @@
     } catch (_) {
       toast("err", tr("errFailed"), "");
     }
-    if (prompt) $("prompt").value = prompt;
     renderValues();
     toast("ok", tr("toastToEdit"), tr("toastToEditDetail"));
   }
@@ -2967,7 +2973,7 @@
       a.download = "imgen.png";
       a.click();
     };
-    $("sendEditBtn").onclick = () => sendToEdit(S.currentImage, null);
+    $("sendEditBtn").onclick = () => sendToEdit(S.currentImage);
 
     /* History */
     $("historySearch").addEventListener("input", () => {
