@@ -2441,8 +2441,10 @@
           await refreshBootstrap().catch(() => {});
           renderEnv();
           renderModels();
+          // Nothing resident, or the card was already empty: a measured zero is
+          // a number worth dropping rather than printing.
           toast("ok",
-            tfx("toastReleased", { n: out.freed_gb != null ? out.freed_gb : "—" }),
+            out.freed_gb ? tfx("toastReleased", { n: out.freed_gb }) : tr("toastReleasedNone"),
             tr("toastReleasedDetail"));
           return;
         }
