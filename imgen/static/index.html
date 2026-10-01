@@ -63,6 +63,11 @@
   <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="2" x2="9" y2="5"/><line x1="15" y1="2" x2="15" y2="5"/><line x1="9" y1="19" x2="9" y2="22"/><line x1="15" y1="19" x2="15" y2="22"/><line x1="2" y1="9" x2="5" y2="9"/><line x1="2" y1="15" x2="5" y2="15"/><line x1="19" y1="9" x2="22" y2="9"/><line x1="19" y1="15" x2="22" y2="15"/></symbol>
   <symbol id="i-minus" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+  <!-- Corners opening outwards / drawing back in: the picture keeps its size,
+       the room around it changes. Not the fullscreen glyph (a screen frame)
+       because this never leaves the app's own overlay. -->
+  <symbol id="i-maximize" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></symbol>
+  <symbol id="i-minimize" viewBox="0 0 24 24"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></symbol>
   <symbol id="i-github" viewBox="0 0 24 24"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></symbol>
 </defs></svg>
 
@@ -361,6 +366,15 @@
           <div class="stageid" id="dStageId">
             <i data-i="colId">图片标识</i><b id="dImageId">—</b>
           </div>
+          <!-- Give the picture the panel's width as well. It sits in the corner
+               diagonally opposite the id because it is the other thing you may
+               want from this viewer: the id tells you *what* you are looking
+               at, this gives it more room. The picture is height-bound here, so
+               the width the panel frees is what it grows into. -->
+          <button type="button" class="stagebtn" id="dExpand" aria-pressed="false">
+            <svg class="ico sb-out" width="15" height="15"><use href="#i-maximize"/></svg>
+            <svg class="ico sb-in" width="15" height="15"><use href="#i-minimize"/></svg>
+          </button>
           <!-- Download lives with the zoom controls: both act on the picture that
                is on screen, so they belong to the same group. -->
           <div class="zoombar">

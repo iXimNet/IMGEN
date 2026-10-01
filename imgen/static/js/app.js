@@ -57,6 +57,9 @@
     detailCurrent: { url: null, index: 0 },
     /* Set while the viewer shows a reference instead of a frame. */
     detailRefIndex: null,
+    /* Whether the detail viewer has taken the panel's column as well. A way of
+       looking at one record, not a mode: closing puts it back. */
+    detailWide: false,
     download: { key: null, pct: 0, bytes: 0, total: null },
   };
 
@@ -387,6 +390,9 @@
     $$('[data-z="out"],[data-dz="out"]').forEach((b) => b.setAttribute("aria-label", tr("zoomOut")));
     $$('[data-z="in"],[data-dz="in"]').forEach((b) => b.setAttribute("aria-label", tr("zoomIn")));
     $$('[data-z="one"],[data-dz="one"]').forEach((b) => b.setAttribute("aria-label", tr("actualSize")));
+    // The fill toggle's label names the next click rather than the thing, so it
+    // is state-dependent and has to be repainted like any other readout.
+    renderDetailExpand();
     renderMode();
     // Anything that reads `S.lang` at render time must be re-run here, or it
     // keeps the previous language until the next unrelated repaint.
@@ -1269,8 +1275,47 @@
   function closeDetail() {
     $("detail").classList.add("hidden");
     S.detailId = null;
+    // Filling the window is a look at the picture, not a state of the app: the
+    // next record opens two-column, with its panel where it belongs.
+    setDetailWide(false);
     syncOverlayState();
     renderHistory();
+  }
+
+  /* The viewer's "give me the whole sheet" toggle. The panel leaves the grid
+     and the viewer takes its column — the record itself is untouched, which is
+     the point: the same picture, more room, and the panel back the moment you
+     want it.
+     Not the Fullscreen API: the picture expands inside the app's own overlay,
+     so Esc, the click-outside-to-close and the window chrome all keep behaving
+     exactly as they did, and the panel is only hidden rather than removed —
+     the arrow keys still walk the history while it is away. */
+  function renderDetailExpand() {
+    const btn = $("dExpand");
+    const wide = S.detailWide;
+    // The class goes on `#detail`, not on the sheet: the overlay's own padding
+    // has to go too, or the picture keeps a 20px frame of the window it was
+    // just handed.
+    $("detail").classList.toggle("wide", wide);
+    btn.setAttribute("aria-pressed", wide ? "true" : "false");
+    // The label names the next click, so it flips with the state.
+    btn.title = tr(wide ? "paneRestore" : "paneFill");
+    btn.setAttribute("aria-label", btn.title);
+  }
+
+  function setDetailWide(on) {
+    const wide = !!on;
+    if (S.detailWide === wide) return;
+    S.detailWide = wide;
+    renderDetailExpand();
+    // A fitted picture was sized against the old viewer, so it has to be
+    // measured again or it keeps the box the other layout gave it. `resize`
+    // only re-fits: a 1:1 or a free zoom is the user's own number and stays.
+    detailZoom.resize();
+    // Folds are measured, and the panel cannot be measured while it is
+    // `display: none` — so a record rendered during a fill would come back
+    // with every prompt open. Re-measure on the way out, never on the way in.
+    if (!wide && !$("detail").classList.contains("hidden")) wirePromptFolds();
   }
 
   function navDetail(dir) {
@@ -2784,6 +2829,7 @@
     $("dClose").onclick = closeDetail;
     $("dPrev").onclick = () => navDetail(-1);
     $("dNext").onclick = () => navDetail(1);
+    $("dExpand").onclick = () => setDetailWide(!S.detailWide);
     $("detail").onclick = (event) => { if (event.target === $("detail")) closeDetail(); };
 
     /* Settings */

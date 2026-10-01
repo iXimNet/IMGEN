@@ -199,6 +199,22 @@ server — see **Multi-image runs** below.
 - Delete sits alone at the left of the action row, spaced away from reuse and
   send-to-edit. Its confirmation now stacks: the message takes its own row with
   the buttons beneath, instead of squeezing both onto one line.
+- **The detail viewer can take the whole window.** A toggle in the viewer's
+  top-right corner drops the panel out of the grid and hands its 360px to the
+  picture; the overlay's own 20px frame goes with it, so the same picture gets
+  the whole window with nothing cropped, stretched or re-zoomed. It is
+  deliberately **not** the Fullscreen API: the overlay stays an overlay, so
+  `Esc`, click-outside-to-close and the window chrome keep behaving as they did,
+  and the panel is only `display: none` — `←` `→` still walk the history while
+  it is away. A fitted picture is re-fitted to the new box, while a 1:1 or a
+  free zoom is the user's own number and is left alone. The button carries its
+  state (`aria-pressed`) and its label names the *next* click, so it flips with
+  the state and follows the language like every other readout. It earns its
+  keep on landscape frames, where width was the binding constraint: the demo
+  strip goes from 1165×457 to 1568×615 at a 1600×1000 window. A record with no
+  picture offers no toggle — there is nothing to look at — but if one is reached
+  by walking the history *while filled*, the toggle stays: it is the only way
+  back to the panel.
 
 ### Top bar
 - **New brand mark: an aperture ring around a glowing safelight core.** The old
