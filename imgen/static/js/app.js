@@ -45,6 +45,10 @@
     outputFrames: [],
     outputIndex: 0,
     hasResult: false,
+    /* The record the canvas is showing. `showResult` is handed the frames and
+       nothing else, and the stage toolbar needs the record to name and size a
+       download the way the detail panel does. */
+    resultItem: null,
     busy: false,
     history: [],
     historyQuery: "",
@@ -52,10 +56,12 @@
     historyLoading: false,
     presetCat: null,
     detailId: null,
-    /* Which picture the open detail overlay is showing. The footer's actions
-       follow it, so a download saves what is on screen. */
+    /* Which picture the open detail overlay is showing — a frame of the run or
+       one of its references, the same either way. The footer's actions follow
+       it, so 下载 and 送到改图 act on what is on screen. */
     detailCurrent: { url: null, index: 0 },
-    /* Set while the viewer shows a reference instead of a frame. */
+    /* Set while the viewer shows a reference instead of a frame: the two kinds
+       are separate index spaces, and only a frame has a file id to show. */
     detailRefIndex: null,
     /* Whether the detail viewer has taken the panel's column as well. A way of
        looking at one record, not a mode: closing puts it back. */
@@ -880,13 +886,48 @@
 
   const historyHasMore = () => S.history.length < S.historyTotal;
 
-  function downloadItem(item) {
-    if (!item.image_url) return;
+  /* The name a saved picture lands under.
+
+     It is the picture's 图片标识: the same string the detail panel shows under
+     that heading, and the same basename the file has under `~/.imgen/outputs/`.
+     So a copy in the Downloads folder can be matched to the file the app made
+     without opening either — which is the whole point of saving one.
+
+     The seed that used to name these is gone on purpose. It is one number per
+     record, while a run may make four pictures: all four shared it, so they all
+     landed as the same name and the browser disambiguated with "(1)", "(2)" —
+     the number doing the disambiguating was the one the name left out. It is
+     still in the record, one click away in 详情, where it is the thing that
+     reproduces the run rather than the thing that tells two files apart.
+
+     A reference has no id of its own: it is stored as `refs/{task}/ref_{nn}.png`
+     and addressed by index, so it is named after its record and its place in
+     the group — the same number its tile carries in the strip. */
+  function pictureFileName(url, refIndex, jobId) {
+    const tail = String(url || "").split("?")[0].split("/").filter(Boolean).pop() || "";
+    // Only the id shape may become part of a name — the same shape the server
+    // accepts before it joins a path. Anything else is not this picture's id.
+    const id = /^[0-9a-f]{16}(?:_[1-9][0-9]*)?$/.test(tail) ? tail : "";
+    if (refIndex != null) return `imgen-${jobId || "record"}-ref${refIndex + 1}.png`;
+    return `imgen-${id || jobId || "picture"}.png`;
+  }
+
+  /* Saving acts on the picture on screen, and so does the name it lands under:
+     both are read from the same two arguments. */
+  function downloadItem(item, url, refIndex) {
+    if (!url) return;
+    const record = item || {};
+    const name = pictureFileName(url, refIndex, record.id);
     const a = document.createElement("a");
-    a.href = item.image_url;
-    a.download = `imgen-${item.seed ?? "nosd"}.png`;
+    a.href = url;
+    a.download = name;
     a.click();
-    toast("ok", tr("toastSaved"), `${item.width || "?"}×${item.height || "?"}`);
+    // The run's width/height describe its *output*. A reference is stored at its
+    // own size and the record does not carry it, so a reference reports none —
+    // printing the output's size there would be saying the reference is that big.
+    const size = record.width && record.height ? `${record.width}×${record.height}` : "";
+    toast("ok", tr("toastSaved"),
+      refIndex == null ? [size, name].filter(Boolean).join(" · ") : name);
   }
 
   /* Reuse writes the left panel only — browsing history must not touch the canvas. */
@@ -1193,15 +1234,17 @@
     const outs = item.image_urls || (item.image_url ? [item.image_url] : []);
     const refs = item.ref_urls || [];
     const viewingOutput = refIndex == null;
-    const url = viewingOutput ? outs[outIndex || 0] : refs[refIndex];
-    // The download button and the strip both follow what is on screen.
-    // `detailRefIndex` is null while a frame is showing.
-    if (viewingOutput) {
-      S.detailCurrent = { url: url || null, index: outIndex || 0 };
-      S.detailRefIndex = null;
-    } else {
-      S.detailRefIndex = refIndex;
-    }
+    const index = viewingOutput ? outIndex || 0 : refIndex;
+    const url = viewingOutput ? outs[index] : refs[index];
+    // The footer's actions and the strip both follow what is on screen, so the
+    // url is recorded for *either* kind of picture. It used to be written only
+    // for a frame, which left the last frame behind while a reference was
+    // showing — 送到改图 and 下载 then acted on that stale picture, and since
+    // the viewer opens on frame 1 it was always the first one no matter which
+    // tile was up. `index` is the tile's position inside its own group;
+    // `detailRefIndex` (null while a frame shows) is what separates the groups.
+    S.detailCurrent = { url: url || null, index };
+    S.detailRefIndex = viewingOutput ? null : refIndex;
     if (!url) {
       detailZoom.clear();
       $("dview").classList.add("no-image");
@@ -1286,7 +1329,8 @@
     $("dSend").classList.toggle("dim", !hasImage);
     // Download sits with the zoom controls under the picture, but it is rendered
     // here so it keeps following the tile on screen.
-    $("dDownload").onclick = () => downloadItem({ ...item, image_url: detailFrame().url || item.image_url });
+    $("dDownload").onclick = () =>
+      downloadItem(item, detailFrame().url || item.image_url, S.detailRefIndex);
     $("dDownload").disabled = !hasImage;
     $("dDownload").classList.toggle("dim", !hasImage);
     $("dDownload").title = tr("downloadImg");
@@ -2575,6 +2619,11 @@
       thumb: thumbs[index] ? `${thumbs[index]}?t=${stamp}` : "",
       w, h,
     }));
+    // The stage toolbar saves what the canvas shows, and needs the record for
+    // the same reasons the detail panel's button does. A run whose row could
+    // not be read still has its id — enough to name a reference, and the sizes
+    // come from the local state instead.
+    S.resultItem = item || { id: jobId, width: w, height: h };
     showResult(frames, w, h);
     const seconds = item && item.duration_ms ? (item.duration_ms / 1000).toFixed(1) : ((Date.now() - started) / 1000).toFixed(1);
     const count = frames.length;
@@ -3226,13 +3275,11 @@
     $("run2").onclick = run;
     $("cancel").onclick = run;
 
-    $("downloadBtn").onclick = () => {
-      if (!S.currentImage) return;
-      const a = document.createElement("a");
-      a.href = S.currentImage;
-      a.download = "imgen.png";
-      a.click();
-    };
+    // The same button as the detail panel's, on the same picture: the canvas
+    // frame that is showing, named by its own id. It used to write a bare
+    // "imgen.png", so the second save was "imgen (1).png" with nothing in
+    // either name to say which picture it was.
+    $("downloadBtn").onclick = () => downloadItem(S.resultItem, S.currentImage, null);
     $("sendEditBtn").onclick = () => sendToEdit(S.currentImage);
 
     /* History */

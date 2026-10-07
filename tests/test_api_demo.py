@@ -9,7 +9,7 @@ from PIL import Image
 fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
-from imgen.app import create_app
+from imgen.app import JOB_FILE_ID, create_app
 
 
 @pytest.fixture()
@@ -346,6 +346,93 @@ def test_send_to_edit_callers_pass_only_the_url(client):
     assert calls, "the call sites must still be findable"
     offenders = [c for c in calls if "," in c]
     assert not offenders, f"sendToEdit takes one argument; got {offenders}"
+
+
+def test_detail_actions_read_whatever_the_viewer_is_showing(client):
+    """The detail viewer has to write the state its own buttons read.
+
+    It shows two kinds of picture — the frames a run made and the references it
+    was given, in two separate index spaces — and the on-screen url used to be
+    recorded only while a frame was up. With a reference showing, the footer
+    still held the last *frame*, so 下载 and 送到改图 both acted on that one.
+    The viewer opens on frame 1, so the picture sent was always the run's first
+    one, whichever tile was on screen.
+
+    The behaviour lives in the DOM, which these tests do not drive; the contract
+    is asserted against the source here, and measured in a real browser by
+    `.workbuddy/tmp/verify_send_current.py` — cases A (three frames), B (frames
+    plus a reference) and C (two references).
+    """
+    js = client.get("/js/app.js").text
+
+    assert "function showDetailSource(item, outIndex, refIndex) {" in js
+    body = js[js.index("function showDetailSource(item, outIndex, refIndex) {"):]
+    body = body[: body.index("if (!url) {")]
+    assert "S.detailCurrent = { url: url || null, index };" in body, (
+        "the url on screen is recorded for whichever kind of picture is up"
+    )
+    assert "if (viewingOutput) {" not in body, (
+        "recording it only for a frame is the defect: a reference then leaves "
+        "the footer holding a stale frame"
+    )
+    # The two kinds keep their own index spaces, and that survives the change.
+    assert "S.detailRefIndex = viewingOutput ? null : refIndex;" in body
+
+    # The stage toolbar reads its own state, and that one is written where the
+    # frames are: `showResult` opens on the first, `selectFrame` follows the
+    # strip. Measured in a real browser, the multi-frame case was already
+    # right — it is only the reference tiles that were short-circuited.
+    strip = js[js.index("function selectFrame(index) {"):]
+    strip = strip[: strip.index("function showResult(")]
+    assert "S.currentImage = frame.url;" in strip, (
+        "picking a frame must move the picture the toolbar sends too"
+    )
+
+
+def test_a_saved_picture_is_named_by_its_own_id(client):
+    """The name has to identify the picture, and no two pictures share it.
+
+    It used to be `imgen-<seed>`, and a seed is one number per *record* while a
+    run may make four pictures: all four carried it, so three frames saved as
+    the same name and the browser did the disambiguating with "(1)", "(2)" —
+    the number that told them apart was the one the name left out. The canvas
+    button wrote a bare "imgen.png", the same collision with less information,
+    and a reference — which is an input, not that seed's output — got the
+    record's seed stamped on it too.
+
+    The name is now the picture's 图片标识: the id the detail panel shows and
+    the basename the file has under `~/.imgen/outputs/`, so a file in the
+    Downloads folder can be matched to the file the app made. The shape checked
+    below is the server's own `JOB_FILE_ID` — the same one it accepts before
+    joining a path — so a name can never be built out of something the server
+    would refuse to serve.
+
+    Measured in a real browser by `.workbuddy/tmp/verify_download_name.py`,
+    which reads `Download.suggested_filename` and compares the saved bytes with
+    the picture at the URL the name claims: 8/17 before, 17/17 after.
+    """
+    js = client.get("/js/app.js").text
+
+    assert "function pictureFileName(url, refIndex, jobId) {" in js
+    assert "a.download = name;" in js
+    assert 'a.download = "imgen.png"' not in js, (
+        "the canvas button must name the frame it saves"
+    )
+    assert 'a.download = `imgen-${item.seed' not in js, (
+        "the seed is shared by every frame of a run — it cannot tell them apart"
+    )
+    # Both buttons go through the one naming function, whatever they are showing.
+    assert "downloadItem(S.resultItem, S.currentImage, null)" in js
+    assert "downloadItem(item, detailFrame().url || item.image_url, S.detailRefIndex)" in js
+
+    body = js[js.index("function pictureFileName(url, refIndex, jobId) {"):]
+    body = body[: body.index("function downloadItem(")]
+    assert JOB_FILE_ID.pattern in body, (
+        "the id is only a name if it is the shape the server serves"
+    )
+    assert "-ref${refIndex + 1}.png" in body, (
+        "a reference has no id of its own, so it is named by place in the group"
+    )
 
 
 def test_jobs_never_expose_local_paths(client):
