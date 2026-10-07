@@ -2391,9 +2391,16 @@
   const RELEASE_TRIES = 120;
 
   function vramReadout() {
-    const vram = ((S.bootstrap && S.bootstrap.engine) || {}).vram;
-    if (!vram || vram.used_gb == null) return "";
-    return tfx("releaseUsed", { used: vram.used_gb, total: vram.total_gb });
+    const engine = (S.bootstrap && S.bootstrap.engine) || {};
+    const vram = engine.vram;
+    if (vram && vram.used_gb != null) {
+      return tfx("releaseUsed", { used: vram.used_gb, total: vram.total_gb });
+    }
+    // The reading failed. Dropping the note entirely is what made a device that
+    // had run out of room look like one with nothing to report — and the
+    // reading is exactly what fails when the card fills up.
+    if (engine.vram_error) return tr("vramUnavailable");
+    return "";
   }
 
   function releaseStoppingText() {
@@ -2750,6 +2757,17 @@
         // Health changed: the engine now holds a pipeline, or recovered from a
         // previous failure. Re-read the status instead of guessing.
         await refreshBootstrap().then(renderEnv).catch(() => {});
+      }
+      if (msg.type === "notice" && msg.code === "int8_streamed") {
+        // The weights were moved off the card because this run would not have
+        // fitted with them resident. Without saying so the only visible
+        // difference is a slower run and no reason for it.
+        noteServerEvent();
+        toast(
+          "ok",
+          tr("noticeLowVramTitle"),
+          tfx("noticeLowVram", { free: msg.free_gb, resident: msg.resident_gb })
+        );
       }
       if (msg.type === "generate_start") {
         // The pipeline call is about to begin; the engine announces the real
