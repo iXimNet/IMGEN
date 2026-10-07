@@ -56,22 +56,6 @@ def test_follow_reference_size_survives_a_degenerate_reference():
     assert w > 0 and h > 0
 
 
-def test_follow_reference_size_takes_the_resolved_area():
-    """The reference area control is what the engine and the studio both use,
-    so the same input must give the same size — no scale-key lookup."""
-    w, h = follow_reference_size(1024, 1200, 1600)
-    assert (w, h) == calculate_dimensions(1024 * 1024, 1200 / 1600)
-    assert w % 32 == 0 and h % 32 == 0
-    assert w < h, "portrait reference must stay portrait"
-    # A different area must actually change the result.
-    assert follow_reference_size(2048, 1200, 1600) != (w, h)
-
-
-def test_follow_reference_size_survives_a_degenerate_reference():
-    w, h = follow_reference_size(1024, 800, 0)
-    assert w > 0 and h > 0
-
-
 def test_a_non_square_reference_is_never_measured_by_an_edge():
     """The reference control is an area, so neither edge is the number.
 
