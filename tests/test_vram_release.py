@@ -11,8 +11,10 @@ rather than pretending, and a cancellation that no longer makes that claim.
 
 import gc
 import re
+import sys
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -216,3 +218,114 @@ def test_the_studio_only_claims_a_release_when_the_server_says_so(app):
     success = body.index("if (out.released)")
     assert body.index("toastReleased") > success
     assert body.index("await new Promise") > success
+
+
+def test_a_vram_reading_that_fails_records_why(monkeypatch):
+    """A blank readout is honest, but it is not reason enough to say nothing.
+
+    `cudaMemGetInfo` is what fails here, and a card filling up is what makes it
+    fail — so the blank reading appeared exactly when the number mattered most,
+    and nothing anywhere recorded why. A device in that state ran its whole
+    remaining life looking like a machine with no GPU.
+    """
+    engine = Engine(demo=True)
+
+    def exploding():
+        raise RuntimeError("CUDA error: out of memory")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(
+            cuda=SimpleNamespace(is_available=lambda: True, mem_get_info=exploding)
+        ),
+    )
+
+    assert engine.vram_usage() is None
+    assert engine._vram_error == "RuntimeError: CUDA error: out of memory"
+    # And it travels: this is the payload the studio reads.
+    assert engine.status()["vram_error"] == "RuntimeError: CUDA error: out of memory"
+
+
+def test_a_vram_reading_that_works_clears_the_error(monkeypatch):
+    """A stale reason left in place would describe a failure that is over."""
+    engine = Engine(demo=True)
+    engine._vram_error = "RuntimeError: from an older attempt"
+
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(
+            cuda=SimpleNamespace(
+                is_available=lambda: True,
+                mem_get_info=lambda: (8 * 1024**3, 32 * 1024**3),
+            )
+        ),
+    )
+
+    assert engine.vram_usage() == {"used_gb": 24.0, "total_gb": 32.0}
+    assert engine._vram_error is None
+    assert engine.status()["vram_error"] is None
+
+
+def test_a_machine_without_cuda_says_so(monkeypatch):
+    engine = Engine(demo=True)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False)),
+    )
+
+    assert engine.vram_usage() is None
+    assert "is_available" in engine._vram_error
+
+
+def test_a_failed_reclaim_records_why(monkeypatch):
+    """Silence here hid the one case that matters: a device already in trouble,
+    where the reclaim is exactly what would have helped."""
+    engine = Engine(demo=True)
+
+    def exploding():
+        raise RuntimeError("driver lost")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(
+            cuda=SimpleNamespace(is_available=lambda: True, empty_cache=exploding)
+        ),
+    )
+
+    engine._free_cuda_cache()
+
+    assert engine._reclaim_error == "RuntimeError: driver lost"
+    assert engine.status()["reclaim_error"] == "RuntimeError: driver lost"
+
+
+def test_the_studio_explains_a_streamed_int8_load(app):
+    """When the weights stream instead of staying put, the run is slower and
+    nothing else about it looks any different. The reason has to reach the
+    reader, in both languages."""
+    with TestClient(app) as client:
+        js = client.get("/js/app.js").text
+        i18n = client.get("/js/i18n.js").text
+
+    assert '"notice"' in js and "int8_streamed" in js
+    assert "noticeLowVram" in js
+    # zh and en — the toast is blank for half the readers otherwise.
+    assert i18n.count("noticeLowVram:") == 2
+    assert i18n.count("noticeLowVramTitle:") == 2
+
+
+def test_the_readout_does_not_go_silently_blank(app):
+    """When the reading fails the row says so instead of dropping the note."""
+    with TestClient(app) as client:
+        js = client.get("/js/app.js").text
+        i18n = client.get("/js/i18n.js").text
+
+    body = js[js.index("function vramReadout"):]
+    body = body[: body.index("\n  }")]
+    assert "vram_error" in body
+    assert "vramUnavailable" in body
+    assert i18n.count("vramUnavailable:") == 2

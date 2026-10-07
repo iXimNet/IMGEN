@@ -392,6 +392,37 @@ def test_startup_reconciles_leftover_running_rows(tmp_path, monkeypatch):
     assert row["error"]
 
 
+class _OrderProbeVae:
+    """Records when its decode ran, so the reclaim can be placed around it."""
+
+    def __init__(self, log):
+        self.log = log
+
+    def decode(self, latents, *args, **kwargs):
+        self.log.append(f"decode:{latents}")
+        return "decoded"
+
+
+def test_the_decode_reclaims_the_samplers_cache_first(monkeypatch):
+    """The sampler leaves the allocator holding blocks sized for its own peak.
+
+    Measured on one 2K run: 49.10 GiB reserved against a 31.82 GiB card, so
+    Windows was paging the overflow to system memory the whole time — and the
+    decode wants a different shape of room entirely. Handing the sampler's
+    blocks back first is what keeps a card this full from failing at the decode,
+    where the OOM lands 0.8s in after the sampling has already been spent.
+    """
+    engine = Engine(demo=True)
+    order = []
+    monkeypatch.setattr(engine, "_free_cuda_cache", lambda: order.append("reclaim"))
+
+    _run(engine, _FakePipe(_OrderProbeVae(order)), [])
+
+    assert order[0] == "reclaim", "the cache goes back before the decode allocates"
+    assert order.count("reclaim") == 1, "once per run, not once per decode call"
+    assert order[1:] == ["decode:latent-a", "decode:latent-b"]
+
+
 def test_decode_time_is_printed_in_the_console(capsys):
     """The console has to show where a run's time went — that is how a
     minutes-long decode stops looking like a hang."""

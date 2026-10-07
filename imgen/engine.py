@@ -27,12 +27,44 @@ from .sizes import follow_reference_size, output_resolution_for, size_for
 ProgressFn = Callable[[dict], None]
 
 
-# Image21-INT8 is ~18.6 GB of weights. A card needs working room on top of them
-# to hold the encoder and transformer resident next to a 2K step's latents and
-# activations — the same ~7 GB the BF16 path reserves (its 40 GB threshold
-# minus 33.1 GB of weights). Below that the components are streamed module by
-# module instead, which is slower but fits.
-INT8_RESIDENT_HEADROOM_GB = 7.0
+# What Image21-INT8 actually holds once it is on the card. Measured on an idle
+# RTX 5090 by loading the resident placement and reading the process's own
+# counters before any run: 16.74 GiB allocated, 16.78 GiB reserved, 18.33 GiB
+# device-used with the CUDA context. The catalogue's `approx_gb` (18.6) is the
+# weight files on disk and lands close; the number this rule used to be built on
+# was not that, it was a 29.83 GiB reading taken from a card that had already run
+# jobs — allocator cache included, and 13 GiB of it was never weights at all.
+INT8_RESIDENT_GB = 16.7
+
+# Working room on top of those weights for the run itself. This is the number
+# that decides everything, and until now it had never been measured: 7.0 was
+# inherited from the BF16 path's reasoning (its 40 GB threshold minus 33.1 GB of
+# weights) and applied to INT8 as if activation cost scaled with weights.
+#
+# It does not. Measured on the same idle card, one 2K run at 30 steps:
+# peak_allocated 43.68 GiB, peak_reserved 49.10 GiB — against a card of
+# 31.82 GiB. So a "2K is fine on a 32 GB card" reading was never true in the
+# sense it implied: the run only completed because Windows paged the overflow to
+# system memory, which is also why its VAE decode took 94 seconds. Subtracting
+# the weights leaves ~27 GiB of activations, and that is the figure here.
+#
+# The headroom scales with the output area. 27.0 GiB is the 2K measurement; a 1K
+# run needs about a quarter (≈6.8 GiB), which fits beside the weights on a
+# 32 GB card — so 1K stays resident and fast while 2K streams.
+INT8_RESIDENT_HEADROOM_GB = 27.0
+
+# The output size the headroom above is quoted for.
+INT8_HEADROOM_REFERENCE_PX = 2048
+
+
+def int8_headroom_gb(output_resolution: int | None) -> float:
+    """Working room a run at this output size needs beside the weights."""
+    resolution = int(output_resolution or 0)
+    if resolution <= 0:
+        # No size known (a bare model load) — assume the worst case.
+        return INT8_RESIDENT_HEADROOM_GB
+    ratio = min(1.0, (resolution / INT8_HEADROOM_REFERENCE_PX) ** 2)
+    return INT8_RESIDENT_HEADROOM_GB * ratio
 
 # Conditioning cost is driven by the reference workload, not just the recipe:
 # the pipeline resizes every reference to the output-resolution *area*, so a 2K
@@ -99,6 +131,13 @@ class Engine:
         # same question as "is a pipeline resident" — an idle engine that has
         # never loaded anything is perfectly healthy.
         self._last_error: dict[str, Any] | None = None
+        # Why the last VRAM reading came back empty, and why the last attempt to
+        # hand memory back failed. Both used to be swallowed without a word,
+        # which turned a device that had run out of room into a machine that
+        # simply stopped showing a number — the reading went blank and nothing,
+        # anywhere, said why. `None` here means the last attempt worked.
+        self._vram_error: str | None = None
+        self._reclaim_error: str | None = None
         # The stage the job in flight is inside (None when idle). The studio
         # polls it: a run sitting silently in a minutes-long encode looks
         # exactly like a wedged one unless the stage is reported.
@@ -124,6 +163,10 @@ class Engine:
             # What the card is holding right now, so the studio can show the
             # number a release would change instead of a total from boot.
             "vram": self.vram_usage(),
+            # Empty when that reading worked. It is evaluated first on purpose:
+            # this describes *that* attempt, not an older one.
+            "vram_error": self._vram_error,
+            "reclaim_error": self._reclaim_error,
         }
 
     def phase_status(self) -> dict[str, Any] | None:
@@ -184,24 +227,42 @@ class Engine:
     def vram_usage(self) -> dict[str, Any] | None:
         """How much of the card is in use, or None when there is no CUDA device.
 
-        Device-wide on purpose: the question the studio asks is "is the card
-        free", and another process holding memory is part of that answer.
+        Device-wide in intent: the question the studio asks is "is the card
+        free", and another process holding memory is part of that answer. On
+        Windows the OS answers a narrower question than that — the figure is a
+        per-process view, measured here at 30.26 GiB free from a second process
+        while the studio held 16.7 GiB of the same 31.8 GiB card — so read it as
+        "what this process believes it can still get", not as the truth about
+        the card.
+
+        A None reading is honest — the number is unknown — but it is not reason
+        enough to say nothing. `cudaMemGetInfo` is what fails here, and that is
+        also what fails once the card fills up, so the blank readout showed up
+        exactly when the reader most needed to see a number. The reason is kept
+        in `_vram_error` and travels out through `status()`.
         """
         try:
             import torch
 
             if not torch.cuda.is_available():
+                self._vram_error = "torch.cuda.is_available() is False"
                 return None
             free, total = torch.cuda.mem_get_info()
+            self._vram_error = None
             return {
                 "used_gb": round((total - free) / (1024**3), 2),
                 "total_gb": round(total / (1024**3), 2),
             }
-        except Exception:
+        except Exception as exc:
+            self._vram_error = f"{type(exc).__name__}: {exc}"
             return None
 
     def _free_cuda_cache(self) -> None:
-        """Hand memory back after the weights are gone.
+        """Hand back whatever the allocator is holding but nothing is using.
+
+        Called after the weights are gone (unload, release) and again just
+        before the VAE decode, which is the other moment the card needs room
+        it is not using.
 
         Letting go of the reference is only half of it. A diffusers pipeline is
         a web of reference cycles, so its modules stay alive until the cyclic
@@ -218,8 +279,11 @@ class Engine:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 torch.cuda.ipc_collect()
-        except Exception:
-            pass
+            self._reclaim_error = None
+        except Exception as exc:
+            # Silence here hid the one case that matters: a device already in
+            # trouble, where the reclaim is exactly what would have helped.
+            self._reclaim_error = f"{type(exc).__name__}: {exc}"
 
     def wait_idle(self, timeout: float) -> bool:
         """Wait for the run in flight to finish. False if it is still going."""
@@ -264,16 +328,27 @@ class Engine:
             "phase": (phase or {}).get("name"),
         }
 
-    def load(self, model_key: str, hub: str, callback: ProgressFn | None = None) -> dict[str, Any]:
+    def load(
+        self,
+        model_key: str,
+        hub: str,
+        callback: ProgressFn | None = None,
+        output_resolution: int | None = None,
+    ) -> dict[str, Any]:
         """Load a pipeline, remembering the failure so the studio can show it.
 
         Both the generate path and `/api/models/load` come through here, so the
         health flag stays correct whichever one hit the problem.
+
+        `output_resolution` is the run this load is for, when there is one. It
+        decides nothing for BF16 or INT4, and for INT8 it decides where the
+        weights live: the same card can hold them resident for a 1K run and not
+        for a 2K one.
         """
         with self._lock:
             self._last_error = None
         try:
-            return self._load(model_key, hub, callback)
+            return self._load(model_key, hub, callback, output_resolution)
         except Exception as exc:
             with self._lock:
                 self._last_error = {
@@ -284,7 +359,13 @@ class Engine:
                 }
             raise
 
-    def _load(self, model_key: str, hub: str, callback: ProgressFn | None = None) -> dict[str, Any]:
+    def _load(
+        self,
+        model_key: str,
+        hub: str,
+        callback: ProgressFn | None = None,
+        output_resolution: int | None = None,
+    ) -> dict[str, Any]:
         callback = callback or (lambda _e: None)
         if model_key not in MODELS:
             raise EngineError(f"Unknown model {model_key}", "UNKNOWN_MODEL")
@@ -327,17 +408,36 @@ class Engine:
             )
         path = resolve_snapshot_dir(path)
         with self._lock:
+            want_offload = (
+                self._should_offload_int8(output_resolution)
+                if spec["loader"] == "int8"
+                else None
+            )
             if (
                 self._loaded
                 and self._loaded.get("model_key") == model_key
                 and self._loaded.get("path") == str(path)
                 and self._pipe is not None
             ):
-                return self._loaded
+                # For INT8 the placement is part of whether this load answers
+                # the question. A pipeline kept resident for a 1K run is the
+                # wrong shape for a 2K one, and reusing it as-is is exactly how
+                # the decode ran out of room. Same model, different recipe: drop
+                # it and load again.
+                if (
+                    want_offload is None
+                    or bool(self._loaded.get("cpu_offload")) == want_offload
+                ):
+                    return self._loaded
+                callback({"type": "load_stage", "stage": "reload"})
+                self._pipe = None
+                self._loaded = None
+                self._free_cuda_cache()
             callback({"type": "load_start", "model_key": model_key, "path": str(path)})
             if spec["loader"] == "int8":
-                offload = self._should_offload_int8()
+                offload = want_offload
                 if offload:
+                    self._announce_int8_streaming(callback, output_resolution)
                     callback({"type": "load_stage", "stage": "cpu_offload"})
                 pipe = self._load_int8(path, callback, offload=offload)
             elif spec["loader"] == "int4":
@@ -372,27 +472,86 @@ class Engine:
         vram = self.device_info.get("vram_gb") or 0
         return vram < 40
 
-    def _should_offload_int8(self) -> bool:
-        """INT8 keeps its weights on the card when they fit.
+    def _available_gb(self) -> float | None:
+        """Free VRAM right now, in GB, or None when it cannot be read."""
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                return None
+            free, _total = torch.cuda.mem_get_info()
+            return free / (1024**3)
+        except Exception:
+            return None
+
+    def _should_offload_int8(self, output_resolution: int | None = None) -> bool:
+        """INT8 keeps its weights on the card when they fit *beside this run*.
 
         ``enable_model_cpu_offload()`` hands every module to the accelerator for
-        its turn and takes it back afterwards, so a card that can simply hold
-        the ~18.6 GB of INT8 weights pays a per-module copy for nothing. Only a
-        card that cannot fit them alongside a 2K step's working set streams
-        them. bitsandbytes INT8 is CUDA-only, and ``_load`` refuses other
-        devices before reaching here, so a non-CUDA answer is never used.
+        its turn and takes it back afterwards, so a card that can hold the
+        weights pays a per-module copy for nothing. Only a card that cannot fit
+        them alongside the run's working set streams them. bitsandbytes INT8 is
+        CUDA-only, and ``_load`` refuses other devices before reaching here, so
+        a non-CUDA answer is never used.
 
-        The floor mirrors the BF16 path's own headroom (40 GB threshold −
-        33.1 GB of weights): the same ~7 GB of activation room, applied to a
-        smaller weight footprint. On the common cards this means a 32 GB or
-        larger accelerator keeps the weights and a 24 GB one streams them.
+        Two numbers decide it, and the second one is the whole story. The first
+        is the weights — ``INT8_RESIDENT_GB``, 16.7 GiB measured. The second is
+        the room the run needs beside them, and that is where the old rule went
+        wrong in both directions: it guessed the weights at 18.6 GiB (the
+        on-disk figure, close enough) but then inherited the *activation* budget
+        from the BF16 path's reasoning, 7 GiB, as though activation cost scaled
+        with weight size. It does not. A measured 2K run peaks at 43.68 GiB
+        allocated and 49.10 GiB reserved against a 31.82 GiB card, and only
+        finishes at all because Windows pages the overflow to system memory —
+        which is also why its VAE decode took 94 seconds.
+
+        And that floor was compared against the device *total*, a number that is
+        only the truth on a card nothing else is using. So a 32 GB card
+        concluded "31.82 ≥ 25.6", kept the weights resident, and died in the VAE
+        decode at 2K with three minutes of sampling already spent.
+
+        Reading what is actually free is the better question, but it is not a
+        complete answer either, and the limits are worth knowing before trusting
+        it. On Windows the figure is a per-process view: a second process on
+        this machine reads 30.26 GiB free while the studio holds 16.7 GiB of the
+        same 31.8 GiB card with nothing running. And it stops answering at all
+        once the calling process's own card is full — which is exactly the state
+        this gets asked from; see `vram_usage()`. So the total stays as the
+        fallback, and it happens to give the same answer as the free reading on
+        this card: with the corrected headroom the 2K floor is 43.7 GiB, above
+        any 32 GB card either way.
         """
         device = self.device_info.get("device")
         if device != "cuda":
             return False
-        vram = self.device_info.get("vram_gb") or 0
-        floor = MODELS["image21-int8"]["approx_gb"] + INT8_RESIDENT_HEADROOM_GB
-        return vram < floor
+        free_gb = self._available_gb()
+        if free_gb is None:
+            # No reading available. Fall back to the device total — what this
+            # used to use always. Optimistic, but it is the only number left.
+            free_gb = float(self.device_info.get("vram_gb") or 0)
+        return free_gb < INT8_RESIDENT_GB + int8_headroom_gb(output_resolution)
+
+    def _announce_int8_streaming(
+        self, callback: ProgressFn, output_resolution: int | None
+    ) -> None:
+        """Say why the weights are being streamed rather than kept in place.
+
+        Without this the studio simply gets slower at the larger sizes for no
+        stated reason, and the difference is invisible: same model, same
+        settings, one run per module and one run not.
+        """
+        free_gb = self._available_gb()
+        if free_gb is None:
+            return
+        callback(
+            {
+                "type": "notice",
+                "code": "int8_streamed",
+                "free_gb": round(free_gb, 1),
+                "resident_gb": INT8_RESIDENT_GB,
+                "headroom_gb": round(int8_headroom_gb(output_resolution), 1),
+            }
+        )
 
     def _load_bf16(self, path, callback: ProgressFn):
         import torch
@@ -549,7 +708,15 @@ class Engine:
                 callback({"type": "generate_phase", "phase": "decode", "slow": False})
                 time.sleep(0.5)
             else:
-                self.load(model_key, hub, callback=callback)
+                # The load is told the size this run will ask for: INT8 decides
+                # where its weights live from whether they fit beside *this*
+                # picture, and 1K and 2K give different answers on one card.
+                self.load(
+                    model_key,
+                    hub,
+                    callback=callback,
+                    output_resolution=output_resolution,
+                )
                 pipe = self._pipe
                 if pipe is None:
                     raise EngineError("Pipeline failed to load.", "LOAD_FAILED")
@@ -793,6 +960,17 @@ class Engine:
 
             def shim(*args, _spec=spec, _kind=kind, _original=original, **kw):
                 self._check_cancel()
+                if _kind == "decode" and _kind not in announced:
+                    # The sampler leaves the allocator holding blocks sized for
+                    # its own peak — measured at 49.10 GiB reserved on a
+                    # 31.82 GiB card, which means Windows was paging the
+                    # overflow to system memory the whole time. The decode wants
+                    # a different shape of room, and by this point none of the
+                    # sampler's blocks are live. Hand them back first: on a card
+                    # this full it is the difference between a render and the
+                    # CUDA OOM that fails 0.8s in, after three minutes of
+                    # sampling have already been spent on it.
+                    self._free_cuda_cache()
                 calls[_kind] = calls.get(_kind, 0) + 1
                 if _kind not in announced:
                     announced.add(_kind)
