@@ -207,6 +207,44 @@ def test_the_reference_edge_says_what_it_drives_in_the_mode_it_is_in(client):
     assert i18n.count("refRec:") == 2 and i18n.count("refRecTitle:") == 2
 
 
+def test_the_reference_readout_names_the_shape_the_area_produces(client):
+    """An area has no silhouette, so the panel has to draw the one it resolves to.
+
+    The field is the side of the square with the same pixel count, which for a
+    non-square reference is neither of its edges — 1792x2400 at 1024 lands on
+    896x1184, and a 3:1 panorama on 1760x576. With several references the answer
+    differs per image, because every reference is relaid out at its own ratio
+    whether or not the follow switch is on. None of that was readable from the
+    number, so the panel states it per reference.
+    """
+    page = client.get("/").text
+    js = client.get("/js/app.js").text.replace("\r\n", "\n")
+    i18n = client.get("/js/i18n.js").text
+    css = client.get("/css/app.css").text.replace("\r\n", "\n")
+
+    # A row that exists in the markup but starts out of the way, because with no
+    # reference there is no shape to name.
+    assert 'id="refMap"' in page and 'class="sub hidden" id="refMap"' in page
+
+    # Drawn from the same area formula the engine uses, once per reference, and
+    # silent until an area has been typed and the probe has a size.
+    assert "const pairs = refSide" in js
+    assert ".filter((ref) => ref.width && ref.height)" in js
+    assert "areaSize(refSide, ref.width / ref.height)" in js
+    assert 'tr(pairs.length > 1 ? "refMapLeadMany" : "refMapLeadOne")' in js
+    assert 'map.classList.toggle("hidden", !pairs.length)' in js and 'map.textContent = ""' in js
+    assert i18n.count("refMapLeadOne:") == 2 and i18n.count("refMapLeadMany:") == 2
+
+    # Each pair is one reading, so a wrap may fall between references but not
+    # inside one — "1792x2400 →" ending a line hides the resolved size.
+    assert 'item.className = "pair"' in js
+    assert "#refMap .pair { white-space: nowrap; }" in css
+
+    # The natural size only arrives after the first paint, and it is the same
+    # size in both modes — so the repaint cannot be left behind the switch.
+    assert "if (followsRef()) renderValues();" not in js
+
+
 @pytest.mark.parametrize("model_key", ["qwen-image-2.1", "image21-int4"])
 def test_demo_generate_and_history(client, model_key):
     response = client.post(

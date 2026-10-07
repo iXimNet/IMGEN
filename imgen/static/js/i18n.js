@@ -55,6 +55,12 @@ const I18N = {
     refRecTitle: "本机推荐参考图边长 {n}px（{where}）。边长翻一倍，参考图面积就是四倍，耗时和显存都跟着涨。",
     refRecTitleDefault: "参考图边长默认 {n}px（没读到可用显存）。边长翻一倍，参考图面积就是四倍，耗时和显存都跟着涨。",
     refWarn: "已超过本机推荐的 {n}px：参考图面积、耗时和显存占用都随边长的平方上涨。",
+    /* The field takes an area, so the number is never the shape. Naming the
+       resolved pair — per reference, since each keeps its own ratio — is what
+       makes that visible instead of inferable. The lead is separate from the
+       pairs because each pair has to be laid out unbreakable. */
+    refMapLeadOne: "参考图",
+    refMapLeadMany: "各参考图",
     sizeFollow: "跟随末张参考图 {w}×{h}，约 {ow}×{oh}",
     sizePlain: "成图 {w} × {h}",
 
@@ -420,6 +426,10 @@ const I18N = {
     refRecTitle: "Reference side this machine has room for: {n}px ({where}). Doubling the edge quadruples the reference area, and the time and the memory rise with it.",
     refRecTitleDefault: "Default reference side {n}px — no usable VRAM reading. Doubling the edge quadruples the reference area, and the time and the memory rise with it.",
     refWarn: "Above this machine's recommended {n}px: the reference area, the time and the memory all grow with the square of the edge.",
+    /* Same reasoning as the Chinese: an area does not have a silhouette, so the
+       resolved pair is spelled out, one per reference. */
+    refMapLeadOne: "Reference",
+    refMapLeadMany: "Each reference",
     sizeFollow: "Following last reference {w}×{h}, about {ow}×{oh}",
     sizePlain: "Output {w} × {h}",
 

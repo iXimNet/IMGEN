@@ -567,6 +567,35 @@
     const advice = refSideAdvice();
     $("outHint").textContent = followsRef() ? tr("followFollow") : tr("followFixed");
     $("outResHint").textContent = followsRef() ? tr("outputResHintFollow") : tr("outputResHintFixed");
+    /* The field holds an area, so what comes out is a shape, and with more than
+       one reference it is a different shape per image — every reference is
+       relaid out at its own ratio, follow switch or not. The resolved pair is
+       the only thing on screen that says so. */
+    const pairs = refSide
+      ? S.refs
+          .filter((ref) => ref.width && ref.height)
+          .map((ref) => {
+            const [ow, oh] = areaSize(refSide, ref.width / ref.height);
+            return `${ref.width}×${ref.height} → ${ow}×${oh}`;
+          })
+      : [];
+    /* A pair is one reading, so the row breaks between references and never
+       inside one — a "1792×2400 →" at the end of a line hides the one number
+       that answers the question. The lead names what is being laid out. */
+    const map = $("refMap");
+    map.textContent = "";
+    map.classList.toggle("hidden", !pairs.length);
+    if (pairs.length) {
+      const lead = document.createElement("span");
+      lead.textContent = tr(pairs.length > 1 ? "refMapLeadMany" : "refMapLeadOne");
+      map.appendChild(lead);
+      pairs.forEach((pair, index) => {
+        const item = document.createElement("span");
+        item.className = "pair";
+        item.textContent = index ? `· ${pair}` : pair;
+        map.appendChild(item);
+      });
+    }
     $("outRec").textContent = tfx("refRec", { n: advice.side });
     $("outRec").title = tfx(advice.bound === "vram" ? "refRecTitle" : "refRecTitleDefault", {
       n: advice.side,
@@ -776,7 +805,11 @@
       probe.onload = () => {
         item.width = probe.naturalWidth;
         item.height = probe.naturalHeight;
-        if (followsRef()) renderValues();
+        /* Read the natural size whichever mode is on. Only the follow switch
+           used to repaint here, which was enough while the reference's own
+           resolved size was unread — every reference is resized by the same
+           area, so the readout that names it needs the size in both modes. */
+        renderValues();
       };
       probe.src = item.url;
       S.refs.push(item);

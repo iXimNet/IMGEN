@@ -101,6 +101,20 @@ server — see **Multi-image runs** below.
   withdrew its 2048px advice, and the panel may not repeat that mistake. The
   header shows the number, its tooltip says where it came from, and both the
   header and a note under the field turn amber only once the field has left it.
+- **The reference edge now shows the shape it resolves to, one per reference.**
+  The field takes an area, so for anything but a square the number is neither of
+  the reference's edges: 1792×2400 at 1024 lands on 896×1184, 16:9 on 1376×768,
+  and a 3:1 panorama on 1760×576 — the number is the square with that pixel count,
+  or `√(w×h)`. With several references the answer differs per image, because every
+  reference is resized at its own ratio whether or not the follow switch is on, so
+  a single number could not be read back as one shape. A line under the field now
+  names each resolved pair (`1792×2400 → 896×1184`), computed from the same
+  `calculate_dimensions` the engine uses. Each pair is laid out unbreakable, so a
+  narrow panel wraps **between** references and never inside one — a "1792×2400 →"
+  at the end of a line hides the very size the line exists to show. The natural
+  size of a reference only arrives after the first paint, and the repaint that
+  reveals it used to be gated on the follow switch, which is why the pair list
+  would have stayed blank for every edit with that switch off.
 - The run button spans the full row and stays optically centred. Cancel no longer
   reserves a 44 px slot beside it — it floats inside the primary's right end — so
   the primary is no longer pushed 26 px left of centre, and it still keeps the

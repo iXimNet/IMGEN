@@ -168,6 +168,11 @@ a.icon-btn { text-decoration: none; }
 .sub.warn { color: var(--accent); }
 /* Two notes in a row are one text block read in two tones, not two paragraphs. */
 .sec > .sub + .sub { margin-top: 4px; }
+/* Each resolved pair is one reading, so a narrow panel may break between
+   references but never inside one: a pair split across lines separates the size
+   a reference is resized to from the size it came from. */
+#refMap { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 4px; row-gap: 2px; }
+#refMap .pair { white-space: nowrap; }
 
 /* ---------- Prompt ---------- */
 .textwrap { position: relative; }

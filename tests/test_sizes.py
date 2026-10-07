@@ -70,3 +70,33 @@ def test_follow_reference_size_takes_the_resolved_area():
 def test_follow_reference_size_survives_a_degenerate_reference():
     w, h = follow_reference_size(1024, 800, 0)
     assert w > 0 and h > 0
+
+
+def test_a_non_square_reference_is_never_measured_by_an_edge():
+    """The reference control is an area, so neither edge is the number.
+
+    `side` is the side of the square with the same pixel count — the geometric
+    mean of the two edges — so a portrait reference comes out taller than the
+    number and a landscape one wider. Both directions have to hold, or the
+    studio would be printing a shape the engine never produces.
+    """
+    for refw, refh in ((1792, 2400), (1920, 1080), (3000, 1000)):
+        w, h = calculate_dimensions(1024 * 1024, refw / refh)
+        assert abs(w * h / (1024 * 1024) - 1) < 0.04, (refw, refh, w, h)
+        assert min(w, h) < 1024 < max(w, h), (refw, refh, w, h)
+        assert w % 32 == 0 and h % 32 == 0
+
+
+def test_one_reference_makes_the_canvas_and_the_reference_the_same_shape():
+    """Follow on with a single reference, and the two coincide.
+
+    Same area, same ratio, so the engine derives one shape twice — which is why
+    the panel can print a single resolved pair for it. Nothing of the sort holds
+    for the other references in a batch: the canvas takes the last reference's
+    ratio while every reference keeps its own, so 896x1184 is what the panel
+    prints for this one and not what the output frame will be if it is not last.
+    """
+    refw, refh = 1792, 2400
+    resolved = follow_reference_size(1024, refw, refh)
+    assert resolved == calculate_dimensions(1024 * 1024, refw / refh)
+    assert resolved == (896, 1184)
