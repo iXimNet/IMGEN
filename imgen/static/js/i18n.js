@@ -41,9 +41,20 @@ const I18N = {
     followRef: "跟随末张参考图比例",
     followRefHint: "宽高与画幅由参考图决定，生成时忽略下面的设置",
     outputRes: "参考图边长",
-    outputResHint: "按这个数的平方作为总面积，保持参考图自己的比例。它不决定成图宽高。",
-    followFollow: "按末张参考图比例换算",
-    followFixed: "由成图宽高决定",
+    /* The sentence under the field answers "what is this number for", and the
+       answer changes with the follow switch: with it on, the pipeline derives
+       the canvas from the same area; with it off the canvas is the width and
+       height fields' business and this only sizes the references. */
+    outputResHintFollow: "这个数的平方是目标总面积。参考图和成图都用它换算，比例取末张参考图。",
+    outputResHintFixed: "这个数的平方是目标总面积，每张参考图按自身比例缩放到这个面积。成图尺寸只由上面的宽高决定。",
+    followFollow: "同时决定成图",
+    followFixed: "不决定成图",
+    /* What the machine in front of it has room for — read off the probed VRAM,
+       named rather than blessed. */
+    refRec: "推荐 {n}",
+    refRecTitle: "本机推荐参考图边长 {n}px（{where}）。边长翻一倍，参考图面积就是四倍，耗时和显存都跟着涨。",
+    refRecTitleDefault: "参考图边长默认 {n}px（没读到可用显存）。边长翻一倍，参考图面积就是四倍，耗时和显存都跟着涨。",
+    refWarn: "已超过本机推荐的 {n}px：参考图面积、耗时和显存占用都随边长的平方上涨。",
     sizeFollow: "跟随末张参考图 {w}×{h}，约 {ow}×{oh}",
     sizePlain: "成图 {w} × {h}",
 
@@ -401,9 +412,14 @@ const I18N = {
     followRef: "Follow last reference aspect",
     followRefHint: "Aspect and size come from the reference; the settings below are ignored",
     outputRes: "Reference side",
-    outputResHint: "Area is this number squared; the reference keeps its own aspect. It does not set the output size.",
-    followFollow: "Derived from the last reference",
-    followFixed: "Set by the output width and height",
+    outputResHintFollow: "Its square is the target area. Both the reference and the output are derived from it, at the last reference's aspect.",
+    outputResHintFixed: "Its square is the target area: every reference is resized to it, keeping its own aspect. The output size comes only from the width and height above.",
+    followFollow: "also sets the output",
+    followFixed: "does not set the output",
+    refRec: "Recommended {n}",
+    refRecTitle: "Reference side this machine has room for: {n}px ({where}). Doubling the edge quadruples the reference area, and the time and the memory rise with it.",
+    refRecTitleDefault: "Default reference side {n}px — no usable VRAM reading. Doubling the edge quadruples the reference area, and the time and the memory rise with it.",
+    refWarn: "Above this machine's recommended {n}px: the reference area, the time and the memory all grow with the square of the edge.",
     sizeFollow: "Following last reference {w}×{h}, about {ow}×{oh}",
     sizePlain: "Output {w} × {h}",
 

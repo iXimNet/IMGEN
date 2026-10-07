@@ -162,13 +162,20 @@
         <section class="sec hidden" id="refSizeBlock">
           <div class="sec-head">
             <h2 class="sec-title" data-i="refSize">参考图缩放</h2>
-            <span class="sec-val" id="outResVal">—</span>
+            <!-- The section used to repeat the number that is already in the
+                 field below. The slot now carries the one reading the field
+                 cannot give itself: the edge this machine has room for. -->
+            <span class="sec-val" id="outRec">—</span>
           </div>
           <div class="field">
             <label class="flabel" for="outRes"><span data-i="outputRes">参考图边长</span><span class="flabel-note" id="outHint"></span></label>
             <div class="numwrap"><input id="outRes" type="number" min="512" max="2752" step="32" value="1024" inputmode="numeric" /><span class="unit">px</span></div>
           </div>
-          <p class="sub" data-i="outputResHint"></p>
+          <!-- One number, two jobs, and which jobs it has is the follow
+               switch's business — so the sentence under it is drawn by script
+               rather than written once here. -->
+          <p class="sub" id="outResHint"></p>
+          <p class="sub warn hidden" id="outResWarn"></p>
         </section>
 
         <section class="sec">

@@ -111,6 +111,20 @@
   const scaleSpec = (key) => ((S.bootstrap && S.bootstrap.sizes && S.bootstrap.sizes.scales) || {})[key || S.scale] || null;
   const sizesForScale = () => (scaleSpec() && scaleSpec().sizes) || {};
   const aspectList = () => Object.keys(sizesForScale());
+  /* The reference edge is the one setting whose *square* is the workload: the
+     pipeline resizes every reference to that area, and with follow on it sizes
+     the canvas from the same number. What the machine can actually hold is a
+     measurement, so it comes from the server (device.reference_side) and is
+     never re-derived here — nor invented when the probe found no card. */
+  const refSideAdvice = () => {
+    const advice = ((S.bootstrap && S.bootstrap.device) || {}).reference_side || {};
+    return { side: Number(advice.side) || 1024, bound: advice.bound || "default" };
+  };
+  const deviceWhere = () => {
+    const device = (S.bootstrap && S.bootstrap.device) || {};
+    const name = device.device_name || device.device || "";
+    return device.vram_gb ? `${name} · ${device.vram_gb} GB` : name;
+  };
 
   function esc(value) {
     return String(value ?? "")
@@ -543,8 +557,27 @@
     $("stepsNote").textContent = S.steps === defaultSteps() ? "" : tfx("stepsNote", { n: defaultSteps() });
     $("cfgNote").textContent = S.cfg <= 1 ? tr("cfgOff") : tfx("cfgOn", { v: S.cfg.toFixed(1) });
     $("cfgTip").textContent = S.cfg <= 1 ? tr("cfgTipOff") : tfx("cfgTipOn", { v: S.cfg.toFixed(1) });
-    $("outResVal").textContent = `${tr("outputRes")} ${$("outRes").value}`;
+    /* The reference edge is one number with two jobs, and the follow switch
+       decides which ones it has: alone it sizes every reference, and with follow
+       on it sizes the canvas too, because the pipeline derives both from the
+       same area. So the note says which. The old copy asserted flatly that the
+       number "does not set the output size", which was the opposite of what the
+       switch was doing whenever it was on. */
+    const refSide = Number($("outRes").value) || 0;
+    const advice = refSideAdvice();
     $("outHint").textContent = followsRef() ? tr("followFollow") : tr("followFixed");
+    $("outResHint").textContent = followsRef() ? tr("outputResHintFollow") : tr("outputResHintFixed");
+    $("outRec").textContent = tfx("refRec", { n: advice.side });
+    $("outRec").title = tfx(advice.bound === "vram" ? "refRecTitle" : "refRecTitleDefault", {
+      n: advice.side,
+      where: deviceWhere(),
+    });
+    // A recommendation nobody is over is not a warning; it only turns into one
+    // once the field has left it, and then only the sentence below says why.
+    const over = refSide > advice.side;
+    $("outRec").classList.toggle("warn", over);
+    $("outResWarn").classList.toggle("hidden", !over);
+    if (over) $("outResWarn").textContent = tfx("refWarn", { n: advice.side });
     $("refCount").textContent = `${S.refs.length} / ${maxRefs()}`;
     // The cap is a server value, so the sentence is filled rather than written.
     $("refsHint").textContent = tfx("refsHint", { n: maxRefs() });

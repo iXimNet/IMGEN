@@ -137,6 +137,76 @@ def test_scale_labels_and_weight_notes_are_descriptive(client):
     assert "leave VAE tiling off" in int8["notes_en"]
 
 
+def test_the_reference_edge_recommendation_is_read_off_the_card(client):
+    """The reference edge is the steepest knob in an edit, so the panel names one.
+
+    It is a measurement, not a vendor figure — the Image21-INT8 card withdrew its
+    2048px advice, and a studio that blessed a size would be repeating that
+    mistake. Only a CUDA card gets a say: too small for the weights and a 1K run
+    to sit together (or too small to read) and the number comes down; with no
+    accelerator there is nothing to measure, so the default stands.
+    """
+    from imgen.device import (
+        REFERENCE_SIDE_ROOMY,
+        REFERENCE_SIDE_TIGHT,
+        reference_side_advice,
+    )
+
+    roomy = reference_side_advice({"device": "cuda", "vram_gb": 32})
+    assert roomy["side"] == REFERENCE_SIDE_ROOMY
+    assert roomy["bound"] == "default"
+
+    for info in (
+        {"device": "cuda", "vram_gb": 12},
+        {"device": "cuda", "vram_gb": None},
+    ):
+        advice = reference_side_advice(info)
+        assert (advice["side"], advice["bound"]) == (REFERENCE_SIDE_TIGHT, "vram")
+
+    for info in ({"device": "cpu", "vram_gb": None}, {"device": "mps", "vram_gb": None}):
+        assert reference_side_advice(info)["bound"] == "default"
+
+    # The panel never re-derives it: it reads whichever answer the server probed.
+    boot = client.get("/api/bootstrap").json()["device"]["reference_side"]
+    assert boot["side"] in {REFERENCE_SIDE_ROOMY, REFERENCE_SIDE_TIGHT}
+    assert boot["bound"] in {"vram", "default"}
+
+
+def test_the_reference_edge_says_what_it_drives_in_the_mode_it_is_in(client):
+    """One number with two jobs, and the panel says which — per mode.
+
+    The field used to carry a fixed line ("it does not set the output size"),
+    which was the opposite of what the follow switch was doing every time it was
+    on, under a section header that repeated the number already in the field.
+    A reader could not tell what the label and the box had to do with each other,
+    because nothing on screen said the answer changes with the switch.
+    """
+    page = client.get("/").text
+    js = client.get("/js/app.js").text.replace("\r\n", "\n")
+    i18n = client.get("/js/i18n.js").text
+
+    # The redundant readout is gone; the header slot carries the one reading the
+    # field cannot give itself.
+    assert 'id="outResVal"' not in page
+    assert "outResVal" not in js
+    assert 'id="outRec"' in page and '$("outRec").textContent = tfx("refRec"' in js
+
+    # The sentence under the field is drawn per mode, so neither mode can be
+    # shown the other one's claim.
+    assert 'id="outResHint"' in page and 'data-i="outputResHint"' not in page
+    assert i18n.count("outputResHintFollow:") == 2
+    assert i18n.count("outputResHintFixed:") == 2
+    assert 'followsRef() ? tr("outputResHintFollow") : tr("outputResHintFixed")' in js
+
+    # The caution is only on screen once the field has left the recommendation,
+    # and then the header stops reading as a neutral number.
+    assert 'id="outResWarn"' in page and 'class="sub warn hidden"' in page
+    assert js.count('$("outResWarn").classList.toggle("hidden", !over)') == 1
+    assert '$("outRec").classList.toggle("warn", over)' in js
+    assert i18n.count("refWarn:") == 2
+    assert i18n.count("refRec:") == 2 and i18n.count("refRecTitle:") == 2
+
+
 @pytest.mark.parametrize("model_key", ["qwen-image-2.1", "image21-int4"])
 def test_demo_generate_and_history(client, model_key):
     response = client.post(

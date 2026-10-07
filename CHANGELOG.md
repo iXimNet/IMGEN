@@ -76,6 +76,31 @@ server — see **Multi-image runs** below.
   area (1024 / 2048) while the readout used the reference-area input, so a custom
   area produced a size the studio never showed. `follow_reference_size()` now
   takes the resolved area, and the engine reads that input first — the two agree.
+- **The reference edge said nothing about what the number does.** Its caption
+  claimed flatly that the number "does not set the output size" — the opposite of
+  the truth whenever 跟随末张参考图比例 was on, where the engine derives the
+  canvas from the same area, and it sat under a header that repeated the value
+  already in the field below. A reader had no way to tell what the label and the
+  box had to do with each other, because nothing on screen said that the answer
+  changes with the switch. The caption now names the scope rather than the
+  derivation — "同时决定成图" / "不决定成图" — and the sentence under the field
+  spells out the mechanism **for the mode it is in**, drawn per mode instead of
+  written once. The header's slot, freed of the repeated value, now carries the
+  one reading the field cannot give itself.
+- **The reference edge now says what the machine has room for.** It is the
+  steepest control in an edit, and not a quality dial: the pipeline resizes every
+  reference to `side²`, so the vision tower's load grows with the *square* of the
+  edge. Measured back to back on this RTX 5090 (31.82 GB) with the output pinned
+  at 2048² and two references: 2048 put the conditioning pass at 737.6s and 1024
+  finished it in 1.5s — and a 2K edit that gets past conditioning still ends
+  holding 31.9/32 GB before it dies at sampling. `probe()` therefore publishes
+  `reference_side`: **1024** on a card that can keep the weights and a 1K run
+  together, **768** when it cannot (or when its VRAM cannot be read), and the
+  studio's own default when there is no accelerator to measure. It is a reading
+  of the machine in front of it, never a blessed size — the Image21-INT8 card
+  withdrew its 2048px advice, and the panel may not repeat that mistake. The
+  header shows the number, its tooltip says where it came from, and both the
+  header and a note under the field turn amber only once the field has left it.
 - The run button spans the full row and stays optically centred. Cancel no longer
   reserves a 44 px slot beside it — it floats inside the primary's right end — so
   the primary is no longer pushed 26 px left of centre, and it still keeps the
