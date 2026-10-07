@@ -193,7 +193,16 @@
           <div class="two split-wide">
             <div class="field">
               <label class="flabel" for="seed"><span data-i="seed">种子</span></label>
-              <div class="numwrap"><input id="seed" type="number" inputmode="numeric" /><span class="unit" data-i="seedHint">留空随机</span></div>
+              <!-- Two states in one box. Empty means "random", and that is worth
+                   saying where a value would go — so the hint sits on the left,
+                   on the input's own text origin. Once a number is there the
+                   hint is gone and the right edge carries the only action a
+                   pinned seed ever needs: back to random, in one click. -->
+              <div class="numwrap seedwrap" id="seedWrap">
+                <input id="seed" type="number" inputmode="numeric" aria-describedby="seedHint" />
+                <span class="seed-hint" id="seedHint" data-i="seedHint">留空随机</span>
+                <button type="button" class="seed-clear" id="seedClear"><svg class="ico" width="12" height="12"><use href="#i-x"/></svg></button>
+              </div>
             </div>
             <div class="field">
               <label class="flabel" for="nImages"><span data-i="nImages">出图数量</span></label>

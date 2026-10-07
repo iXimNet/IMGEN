@@ -256,6 +256,30 @@ input[type="number"] { -moz-appearance: textfield; }
 .numwrap .unit { position: absolute; right: 11px; top: 50%; transform: translateY(-50%); font-family: var(--mono); font-size: 11.5px; color: var(--ink-faint); pointer-events: none; }
 .numwrap input:placeholder-shown + .unit { color: var(--ink-faint); }
 
+/* Seed. The field is never *wrong* when it is empty — empty is the instruction,
+   "pick one" — so the hint has to be read as part of the field, not as a caption
+   floating beside it: it sits on the input's own text origin, in the value's
+   place, and only exists while there is no value. Once a number is in there the
+   hint would be a lie, and the useful thing on that edge is the one action a
+   pinned seed ever needs. Both are `display`-toggled rather than faded: the
+   switch happens under the caret while typing, where an animation is noise, and
+   a hidden clear button must leave the tab order, which `opacity` alone would
+   not do. */
+.seedwrap input { padding-right: 32px; }
+.seed-hint {
+  position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+  font-family: var(--mono); font-size: 13px; color: var(--ink-faint);
+  pointer-events: none; white-space: nowrap;
+}
+.seed-clear {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  width: 20px; height: 20px; display: none; place-items: center;
+  border-radius: 6px; color: var(--ink-faint);
+}
+.seed-clear:hover { background: var(--sel); color: var(--ink); }
+.seedwrap.has-value .seed-hint { display: none; }
+.seedwrap.has-value .seed-clear { display: grid; }
+
 /* Stepper: a bounded count is stepped, not typed. 1–4 has no use for a wide
    field, so the two buttons take that space instead — a bigger target than a
    native spinner, and it keeps the count at the column edge where the eye

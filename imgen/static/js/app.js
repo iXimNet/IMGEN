@@ -424,6 +424,7 @@
     renderRun();
     // The count stepper's spoken labels are translated, so they follow too.
     renderCount();
+    renderSeed();
     // The stage readout is language-sensitive too; a switch mid-render must not
     // leave "VAE 解码中…" on screen in English mode.
     renderPhase();
@@ -549,6 +550,18 @@
     });
     renderCount();
     renderPins();
+  }
+
+  /* The seed well has two states, and which one is on screen is the only thing
+     that says whether the run is pinned. Empty is not "missing" — it is the
+     instruction to pick one — so the hint stands in for the value, and a number
+     replaces it with the way back. The toggle lives on the wrapper rather than
+     on either half, so one rule owns both: there is no state in which the hint
+     lies under a number, or a clear button sits over an empty field. */
+  function renderSeed() {
+    $("seedWrap").classList.toggle("has-value", $("seed").value !== "");
+    // Spoken label follows the language, so it is set here, not in the HTML.
+    $("seedClear").setAttribute("aria-label", tr("seedClear"));
   }
 
   /* The stepper: one to four pictures per run. The buttons carry the state at
@@ -898,6 +911,9 @@
     $("cfg").value = S.cfg;
     $("cfgNum").value = S.cfg.toFixed(1);
     $("seed").value = item.seed != null ? item.seed : "";
+    // Reusing a run carries its seed, and that write is not typing: the hint /
+    // clear pair has to be re-read or the field would claim to be empty.
+    renderSeed();
     $("nImages").value = p.num_images || 1;
     $("kv").setAttribute("aria-checked", p.use_kv_cache === false ? "false" : "true");
     $("rgba").setAttribute("aria-checked", p.transparent ? "true" : "false");
@@ -2366,8 +2382,11 @@
   const RELEASE_HOSTS = ["releaseRow", "releaseEnvRow"];
   // A stage does not check the stop flag while it runs — one CUDA op cannot be
   // interrupted from Python — so the request is repeated until the run returns
-  // from whatever it is inside. 5s x 120 is long enough for the worst measured
-  // stage (a 2K conditioning pass, minutes) without leaving a spinner forever.
+  // from whatever it is inside. A round costs two waits, not one: the server
+  // holds each request for RELEASE_WAIT_S (15s) before answering `stopping`, and
+  // the gap below runs after that. So 120 rounds is about forty minutes, not the
+  // ten the old comment claimed — enough for the worst measured stage (a 2K
+  // conditioning pass, 737s) without leaving a spinner forever.
   const RELEASE_POLL_MS = 5000;
   const RELEASE_TRIES = 120;
 
@@ -2404,7 +2423,16 @@
         host.classList.toggle("hidden", !wantsRelease());
       }
       if (S.releaseStage === "stopping") {
-        host.innerHTML = `<span class="relnote">${esc(releaseStoppingText())}</span>`;
+        // The note and the button travel together. A stage can hold the request
+        // for as long as it runs, and a row showing nothing but "stop requested"
+        // reads as a studio that has stopped listening — there is no way back to
+        // the action and no way to tell it apart from a wedged tab. Disabled
+        // while the poll is in flight, live again once it gives up.
+        host.innerHTML =
+          `<button type="button" class="btn sm"${S.releasing ? " disabled" : ""}>` +
+            `${esc(tr("releaseVram"))}</button>` +
+          `<span class="relnote">${esc(releaseStoppingText())}</span>`;
+        host.querySelector("button").onclick = () => askRelease(id);
         return;
       }
       const used = vramReadout();
@@ -2458,6 +2486,11 @@
       toast("err", tr("toastReleasePending"), tr("toastReleasePendingDetail"));
     } finally {
       S.releasing = false;
+      // The wait is over, whichever way it ended. Keeping `stopping` here is
+      // what turned "you can also ask again" into a dead end: the row kept the
+      // note and never rebuilt a button, in either host, so the only way out was
+      // a reload. Clearing it puts the action back.
+      S.releaseStage = null;
       renderReleaseSlots();
     }
   }
@@ -2883,6 +2916,9 @@
     $("cfg").value = S.cfg;
     $("cfgNum").value = S.cfg.toFixed(1);
     $("seed").value = p.seed || "";
+    // Same reason as `applyItemParams`: restoring a snapshot is a write, not
+    // typing, so the seed well's state is stale until it is re-read.
+    renderSeed();
     $("nImages").value = p.nImages;
     $("kv").setAttribute("aria-checked", p.kv ? "true" : "false");
     $("rgba").setAttribute("aria-checked", p.rgba ? "true" : "false");
@@ -3091,6 +3127,18 @@
       S.out = Number($("outRes").value) || 1024;
       renderValues();
     });
+
+    /* Seed. Typing swaps the hint for the clear button, so the state has to be
+       re-read on every keystroke — a number pasted in, or one the browser
+       restores, arrives without an `input` event of its own. Clearing focuses
+       the field again: the button took the focus to be clicked, and leaving it
+       on a dead control strands the caret. */
+    $("seed").addEventListener("input", renderSeed);
+    $("seedClear").onclick = () => {
+      $("seed").value = "";
+      renderSeed();
+      $("seed").focus();
+    };
 
     /* Count stepper. `readonly` keeps the field a value display, so the arrow
        keys and the two buttons are the ways in — and both clamp identically. */

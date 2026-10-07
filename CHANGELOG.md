@@ -86,6 +86,18 @@ server — see **Multi-image runs** below.
 - Steps and CFG values are editable numbers with 20 / 40 / 60 quick presets.
 - Prompt placeholder and hint now say different things instead of repeating.
 - The run button keeps its width while busy — cancel sits in a reserved slot.
+- **The seed field now says which of its two states it is in.** It is the one
+  control whose emptiness is a valid setting rather than a missing value — blank
+  means "pick one" — and the panel carried that as a static "留空随机" caption
+  pinned to the right edge. The caption stayed on screen over a pinned seed, so
+  it claimed the field was empty while a number sat in it, and it offered no way
+  back. Empty and filled are now exclusive and each owns one edge: the hint
+  stands in for the value on the input's own text origin, and a number replaces
+  it with a one-click clear on the right. Both halves are driven by a single
+  `has-value` class on the wrapper, so the two can never be on screen together.
+  The clear button is `display`-toggled rather than faded, which keeps it out of
+  the tab order while there is nothing to clear, and clicking it returns the
+  caret to the field.
 
 ### History
 - Clicking a row opens a detail overlay with a zoomable large image, grouped

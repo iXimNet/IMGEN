@@ -948,3 +948,46 @@ def test_bootstrap_reports_the_sampling_defaults(client):
     assert defaults["steps"] == DEFAULT_STEPS
     assert defaults["cfg"] == DEFAULT_CFG
     assert defaults["max_images"] == 4
+
+
+def test_the_seed_well_states_its_own_contents(client):
+    """The seed field is the one control whose *emptiness* is a valid, meaningful
+    setting, so the panel has to say which of the two states it is in.
+
+    It used to carry a static "blank = random" caption pinned to the right edge:
+    it stayed there over a pinned seed, claiming the field was empty while a
+    number sat in it, and it explained nothing about how to get back. The two
+    states are now exclusive and each owns one edge — the hint stands in for the
+    value, the clear button replaces it — and the guard is that a single
+    `has-value` class on the wrapper drives both, so no combination of them can
+    be on screen at once.
+    """
+    page = client.get("/").text
+    css = client.get("/css/app.css").text.replace("\r\n", "\n")
+    js = client.get("/js/app.js").text.replace("\r\n", "\n")
+    i18n = client.get("/js/i18n.js").text
+
+    assert 'id="seedWrap"' in page and 'class="numwrap seedwrap"' in page
+    assert 'id="seedHint"' in page and 'data-i="seedHint"' in page
+    assert 'id="seedClear"' in page
+    # The hint is announced as the field's description, so the meaning reaches a
+    # screen reader and not only the eye.
+    assert 'aria-describedby="seedHint"' in page
+
+    # One class, both halves: nothing else may decide what the field looks like.
+    assert ".seedwrap.has-value .seed-hint { display: none; }" in css
+    assert ".seedwrap.has-value .seed-clear { display: grid; }" in css
+    # `display`, not `opacity` — a clear button that is only invisible is still in
+    # the tab order, and reachable with nothing on screen to explain it.
+    assert "opacity" not in css[css.index(".seed-clear {"): css.index(".seed-clear {") + 400]
+
+    # JS writes the value in three places; only one of them is typing, so all of
+    # them have to re-read the state or the panel contradicts itself.
+    assert js.count('$("seed").value =') == 3
+    assert js.count("renderSeed();") == 4  # input, clear click, reuse, snapshot
+    assert "$(\"seedClear\").onclick" in js
+    # Clearing has to hand the caret back: the click took the focus.
+    assert "$(\"seed\").focus();" in js
+    # The clear button is a real control, named in both languages.
+    assert "seedClear" in i18n and i18n.count("seedClear:") == 2
+    assert "$(\"seedClear\").setAttribute(\"aria-label\", tr(\"seedClear\"))" in js
