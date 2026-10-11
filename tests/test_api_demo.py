@@ -919,19 +919,33 @@ def test_brand_wordmark_is_served_transparent(client):
 
     # The header version is the light one, not the near-black original. Compare
     # only where the ink is actually opaque: transparent pixels carry whatever
-    # colour the source had and would drag the average anywhere.
-    import numpy as np
+    # colour the source had and would drag the average anywhere. Pillow only —
+    # numpy is not a project or CI dependency, and the CPU torch index does not
+    # install it either.
+    def opaque_rgb_mean(image: Image.Image) -> tuple[float, float, float]:
+        image = image.convert("RGBA")
+        pixels = image.load()
+        width, height = image.size
+        total = [0, 0, 0]
+        count = 0
+        for y in range(height):
+            for x in range(width):
+                red, green, blue, alpha = pixels[x, y]
+                if alpha > 200:
+                    total[0] += red
+                    total[1] += green
+                    total[2] += blue
+                    count += 1
+        assert count, "no visible ink"
+        return tuple(channel / count for channel in total)
 
     dark = Image.open(io.BytesIO(client.get("/brand/imgen-wordmark-dark.png").content))
-    arr = np.array(dark)
-    ink = arr[arr[:, :, 3] > 200][:, :3]
-    assert len(ink), "the dark variant has no visible ink"
-    avg = ink.mean(axis=0)
-    assert avg.min() > 200, f"the dark variant is not light enough for the header ({avg})"
+    dark_avg = opaque_rgb_mean(dark)
+    assert min(dark_avg) > 200, f"the dark variant is not light enough for the header ({dark_avg})"
 
     plain = Image.open(io.BytesIO(client.get("/brand/imgen-wordmark.png").content))
-    plain_ink = np.array(plain)[np.array(plain)[:, :, 3] > 200][:, :3]
-    assert plain_ink.mean(axis=0).max() < 60, "the README variant should stay near-black"
+    plain_avg = opaque_rgb_mean(plain)
+    assert max(plain_avg) < 60, "the README variant should stay near-black"
 
 
 def test_weight_dirs_normalisation(tmp_path):
