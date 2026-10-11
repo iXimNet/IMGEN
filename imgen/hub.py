@@ -1,4 +1,4 @@
-"""Download BF16 / Image21-INT8 / Image21-INT4 from Hugging Face or ModelScope."""
+"""Download the catalog's checkpoints from Hugging Face or ModelScope."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from .constants import HUBS, MODELS, repo_id
+from .constants import HUBS, MODELS, TURBO_SIGMAS_KEY, repo_id
 
 ProgressFn = Callable[[dict], None]
 
@@ -441,15 +441,51 @@ def _is_qwen_image_snapshot(payload: dict) -> bool:
     return "QwenImage21" in marker
 
 
-def _sniff_precision(snapshot: Path) -> str | None:
-    """Which precision a snapshot holds, from the conversion metadata.
+def _read_model_index(snapshot: Path) -> dict | None:
+    """The snapshot's own `model_index.json`, or None if it cannot be read."""
+    try:
+        payload = json.loads(
+            (snapshot / "model_index.json").read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
 
-    All three catalog models share one pipeline class, so the only thing that
-    tells them apart on disk is what the quantised releases record about their
-    own conversion. A snapshot that is quantised without saying how is refused:
-    INT8 and INT4 cannot be told apart from file names alone, and loading the
-    wrong one is worse than asking the user to add the folder under its own
-    name.
+
+def _carries_turbo_recipe(payload: dict | None) -> bool:
+    """Whether a `model_index.json` publishes the distilled sampling schedule.
+
+    This one key is what separates the Turbo releases from their base siblings,
+    and it survives quantisation — the INT8 conversion of Turbo reproduces it
+    value for value. A conversion that drops it is still caught by the other
+    witness, `conversion.json`'s `base_model`; see `_sniff_precision`.
+    """
+    recipe = (payload or {}).get(TURBO_SIGMAS_KEY)
+    return isinstance(recipe, list) and len(recipe) > 1
+
+
+def _sniff_precision(snapshot: Path, payload: dict | None = None) -> str | None:
+    """Which catalog model a snapshot holds, from its own metadata.
+
+    Every catalog model shares one pipeline class, so the only thing that tells
+    them apart on disk is what each release records about itself. A snapshot that
+    is quantised without saying how is refused: INT8 and INT4 cannot be told
+    apart from file names alone, and loading the wrong one is worse than asking
+    the user to add the folder under its own name.
+
+    The unquantised reads need the same care now that two BF16 entries exist.
+    The distilled checkpoint publishes its sampling recipe under a top-level key
+    in `model_index.json`, and that key is the one thing that distinguishes it
+    from the base weights — without this check a Turbo folder added by hand
+    would be claimed as Qwen-Image-2.1 and run on a 40-step schedule.
+
+    Quantised folders need it too, for the same reason and with the same
+    consequence: a Turbo-INT8 folder read as Image21-INT8 would run the distilled
+    weights on the base schedule. Two witnesses answer, and either one suffices:
+    the converter records the weights it quantised in `base_model`, and the
+    schedule is republished on the key above. The second is deliberately the same
+    key the unquantised branch reads, so one rule covers both. INT4 has a single
+    release so far; a Turbo-INT4 would need the same question asked here.
     """
     conversion = snapshot / "conversion.json"
     if conversion.is_file():
@@ -465,10 +501,19 @@ def _sniff_precision(snapshot: Path) -> str | None:
         if any(marker in text for marker in _INT4_MARKERS):
             return "image21-int4"
         if any(marker in text for marker in _INT8_MARKERS):
-            return "image21-int8"
+            turbo = "turbo" in str(meta.get("base_model") or "").lower()
+            if not turbo:
+                turbo = _carries_turbo_recipe(
+                    payload if payload is not None else _read_model_index(snapshot)
+                )
+            return "image21-turbo-int8" if turbo else "image21-int8"
         return None
     if any(snapshot.glob("*-quantization.json")):
         return None
+    if payload is None:
+        payload = _read_model_index(snapshot)
+    if _carries_turbo_recipe(payload):
+        return "qwen-image-2.1-turbo"
     return "qwen-image-2.1"
 
 
@@ -487,7 +532,7 @@ def sniff_snapshot_model(snapshot: Path) -> str | None:
         return None
     if not isinstance(payload, dict) or not _is_qwen_image_snapshot(payload):
         return None
-    return _sniff_precision(snapshot)
+    return _sniff_precision(snapshot, payload)
 
 
 def _own_snapshot_dir(folder: Path) -> Path | None:

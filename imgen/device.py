@@ -75,6 +75,7 @@ def probe() -> dict[str, Any]:
     if torch is None:
         info["warnings"].append("PyTorch is not installed. Follow the README to install a platform wheel.")
         info["recommendations"].append("qwen-image-2.1")
+        info["recommendations"].append("qwen-image-2.1-turbo")
         info["reference_side"] = reference_side_advice(info)
         return info
 
@@ -99,7 +100,15 @@ def probe() -> dict[str, Any]:
             info["warnings"].append(
                 "Less than 12 GiB VRAM. Prefer Image21-INT4 at 1K with automatic CPU offload."
             )
-        info["recommendations"].extend(["image21-int4", "image21-int8", "qwen-image-2.1"])
+        info["recommendations"].extend(
+            [
+                "image21-int4",
+                "image21-int8",
+                "qwen-image-2.1",
+                "qwen-image-2.1-turbo",
+                "image21-turbo-int8",
+            ]
+        )
     elif mps:
         info["device"] = "mps"
         info["device_name"] = "Apple Silicon (MPS)"
@@ -108,14 +117,18 @@ def probe() -> dict[str, Any]:
         info["warnings"].append(
             "Image21-INT8 requires NVIDIA CUDA. On macOS use Image21-INT4 or Qwen-Image-2.1."
         )
-        info["recommendations"].extend(["image21-int4", "qwen-image-2.1"])
+        info["recommendations"].extend(
+            ["image21-int4", "qwen-image-2.1", "qwen-image-2.1-turbo"]
+        )
     else:
         info["device"] = "cpu"
         info["device_name"] = "CPU"
         info["warnings"].append(
             "No CUDA or MPS device detected. CPU inference is technically possible but extremely slow."
         )
-        info["recommendations"].extend(["image21-int4", "qwen-image-2.1"])
+        info["recommendations"].extend(
+            ["image21-int4", "qwen-image-2.1", "qwen-image-2.1-turbo"]
+        )
     info["reference_side"] = reference_side_advice(info)
     return info
 

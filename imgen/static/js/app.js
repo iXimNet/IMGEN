@@ -101,7 +101,19 @@
   const hubLabel = (key) => (key === "modelscope" ? tr("hubMs") : tr("hubHf"));
   const maxRefs = () => defaults().max_reference_images || 10;
   const defaultSteps = () => defaults().steps || 40;
+  const defaultCfg = () => (defaults().cfg != null ? Number(defaults().cfg) : 1);
   const maxImages = () => defaults().max_images || 4;
+  /* A distilled checkpoint runs on the recipe it was trained for, and the
+     engine re-applies that recipe after every normalisation — including on a
+     request that never came from this panel. The numbers travel in the model
+     catalog the bootstrap already sends, so the panel can show the run that
+     will really happen: a slider that still moves while the engine ignores it
+     is the trap this avoids. A model that declares nothing returns an empty
+     object and every control stays as it was. */
+  const lockedParams = () => {
+    const catalog = (S.bootstrap && S.bootstrap.model_catalog) || {};
+    return (catalog[S.modelKey] || {}).locked_params || {};
+  };
   /* Tiling is opt-in now. "auto" is a legacy value meaning "resolution decided"
      — it resolves to off, so the select must show it that way. */
   const vaeTilingValue = (raw) => {
@@ -523,6 +535,39 @@
     renderRatios(); renderValues();
   }
 
+  /* One place writes the sampling numbers into their controls. The form posts
+     what the inputs hold, so a value living only in `S` is a value the run does
+     not get — and a header reading 40 above a field holding 8 is worse than
+     either number alone. */
+  function paintSamplingFields() {
+    $("steps").value = S.steps;
+    $("stepsNum").value = S.steps;
+    $("cfg").value = S.cfg;
+    $("cfgNum").value = S.cfg.toFixed(1);
+  }
+
+  /* Put the locked values into the panel and take their controls out of play.
+     Both halves matter: the value has to be the one the engine will use, and
+     the control has to stop accepting input, or the panel would offer a change
+     that silently does nothing. Returns which fields are locked, so the copy
+     under them can say why. */
+  function applyLocks() {
+    const locked = lockedParams();
+    const stepsLocked = locked.steps != null;
+    const cfgLocked = locked.true_cfg_scale != null;
+    if (stepsLocked) S.steps = Number(locked.steps);
+    if (cfgLocked) S.cfg = Number(locked.true_cfg_scale);
+    paintSamplingFields();
+    $("steps").disabled = stepsLocked;
+    $("stepsNum").disabled = stepsLocked;
+    /* The three presets are a shortcut to 20 / 40 / 60 on a model whose recipe
+       is none of those, so they go rather than sit there greyed out. */
+    $("stepQuick").classList.toggle("hidden", stepsLocked);
+    $("cfg").disabled = cfgLocked;
+    $("cfgNum").disabled = cfgLocked;
+    return { stepsLocked, cfgLocked };
+  }
+
   function renderValues() {
     /* A preset hit is authoritative. Otherwise the label is derived from the
        numbers on screen, so the header never claims a proportion the two fields
@@ -551,12 +596,24 @@
       : tr("alignTip");
     $("alignTip").classList.toggle("warn", !!snapped);
 
+    const locks = applyLocks();
     $("sampVal").textContent = `${S.steps} · CFG ${S.cfg.toFixed(1)}`;
     // Only speak up when the value has left the default; next to a live number,
-    // a permanent "defaults to 40" reads as a description of that number.
-    $("stepsNote").textContent = S.steps === defaultSteps() ? "" : tfx("stepsNote", { n: defaultSteps() });
-    $("cfgNote").textContent = S.cfg <= 1 ? tr("cfgOff") : tfx("cfgOn", { v: S.cfg.toFixed(1) });
-    $("cfgTip").textContent = S.cfg <= 1 ? tr("cfgTipOff") : tfx("cfgTipOn", { v: S.cfg.toFixed(1) });
+    // a permanent "defaults to 40" reads as a description of that number. A
+    // locked value is the opposite case: it is not a default the user can beat,
+    // so the note stays on screen and says where the number comes from.
+    $("stepsNote").textContent = locks.stepsLocked
+      ? tfx("stepsLocked", { n: S.steps })
+      : (S.steps === defaultSteps() ? "" : tfx("stepsNote", { n: defaultSteps() }));
+    $("cfgNote").textContent = locks.cfgLocked
+      ? tfx("cfgLocked", { v: S.cfg.toFixed(1) })
+      : (S.cfg <= 1 ? tr("cfgOff") : tfx("cfgOn", { v: S.cfg.toFixed(1) }));
+    /* With guidance off the negative field still looks live, so the tip says
+       when it does not apply rather than leaving a box that takes text and
+       changes nothing. */
+    $("cfgTip").textContent = locks.cfgLocked
+      ? tr("cfgTipLocked")
+      : (S.cfg <= 1 ? tr("cfgTipOff") : tfx("cfgTipOn", { v: S.cfg.toFixed(1) }));
     /* The reference edge is one number with two jobs, and the follow switch
        decides which ones it has: alone it sizes every reference, and with follow
        on it sizes the canvas too, because the pipeline derives both from the
@@ -1031,6 +1088,11 @@
     // source itself if the weights live in the other hub.
     if (source && source.downloaded_any) S.modelKey = source.key;
     renderPins();
+    /* The adopted model may be a distilled one, and its recipe is not the
+       record's to carry: a history entry saved under another model can hold a
+       step count this one will never run. Re-apply the locks before the
+       snapshot below, or the parked panel would remember the wrong numbers. */
+    applyLocks();
 
     $("prompt").value = item.prompt || "";
     $("negative").value = item.negative_prompt || "";
@@ -1892,11 +1954,32 @@
       if (loaded && loaded.model_key && (loaded.model_key !== model.key || hubChanged)) {
         await api("/api/models/unload", { method: "POST" }).catch(() => {});
       }
+      // Which fields the model being left had locked, read while it is still
+      // the current one — the catalog is keyed by model, so this has to be
+      // taken before the switch, not after.
+      const leaving = lockedParams();
       S.modelKey = model.key;
       S.hub = hub;
       await refreshBootstrap();
+      /* Walking off a distilled model must not carry its recipe onto one that
+         honours the controls: 8 steps left in the field would be a preference
+         nobody expressed. Only fields the new model does *not* lock are put
+         back, so switching between two distilled models keeps the new one's
+         own numbers (which `applyLocks` writes on the repaint below). */
+      const arriving = lockedParams();
+      const released =
+        (leaving.steps != null && arriving.steps == null) ||
+        (leaving.true_cfg_scale != null && arriving.true_cfg_scale == null);
+      if (leaving.steps != null && arriving.steps == null) S.steps = defaultSteps();
+      if (leaving.true_cfg_scale != null && arriving.true_cfg_scale == null) S.cfg = defaultCfg();
+      // Repainted here rather than left to the repaint below: the fields are
+      // what the form posts, so a number that only reached `S` would be shown
+      // in the header and not sent to the server. Doing it where the release
+      // happens keeps that from depending on the order of later calls.
+      if (released) paintSamplingFields();
       renderHubSegments();
       renderModels(); renderWeightsList(); renderPins(); renderStorage();
+      renderValues();
       toast("ok", tfx("toastModelSwitched", { label: model.label }),
         hubChanged ? tfx("toastModelSwitchedFromHub", { hub: hubLabel(hub) })
                    : tfx("toastModelSwitchedDetail", { precision: model.precision }));

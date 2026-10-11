@@ -59,7 +59,11 @@ def test_health_and_bootstrap(client):
     assert boot["prompts"]["counts"]["generate_prompts"] >= 70
     assert boot["sizes"]["2k"]["1:1"] == [2048, 2048]
     assert {row["key"] for row in boot["models"]} == {
-        "qwen-image-2.1", "image21-int8", "image21-int4",
+        "qwen-image-2.1",
+        "qwen-image-2.1-turbo",
+        "image21-turbo-int8",
+        "image21-int8",
+        "image21-int4",
     }
 
 

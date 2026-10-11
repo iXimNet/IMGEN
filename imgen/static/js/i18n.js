@@ -76,6 +76,12 @@ const I18N = {
     cfgOn: "CFG {v} · 已开启",
     cfgTipOff: "CFG 1.0 表示关闭分类器引导，也是最快的档位。",
     cfgTipOn: "CFG {v} 会启用分类器引导，每步约多花一倍时间，配负向提示词才值得开。",
+    /* A distilled checkpoint brings its own recipe; these say so where the
+       controls used to be, because a disabled slider with no reason next to it
+       reads as a bug. */
+    stepsLocked: "内置 {n} 步配方",
+    cfgLocked: "CFG {v} · 由模型固定",
+    cfgTipLocked: "蒸馏版自带引导设置，负向提示词不参与。",
     seed: "种子",
     seedHint: "留空随机",
     seedClear: "清空种子",
@@ -444,6 +450,9 @@ const I18N = {
     cfgOn: "CFG {v} · on",
     cfgTipOff: "CFG 1.0 means classifier guidance is off, and is also the fastest setting.",
     cfgTipOn: "CFG {v} enables guidance. Each step costs roughly double, so it only pays off with a negative prompt.",
+    stepsLocked: "built-in {n}-step recipe",
+    cfgLocked: "CFG {v} · fixed by the model",
+    cfgTipLocked: "A distilled build carries its own guidance setting, so a negative prompt has no effect.",
     seed: "Seed",
     seedHint: "blank = random",
     seedClear: "Clear seed",

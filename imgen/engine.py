@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import inspect
+import json
 import random
 import threading
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 from PIL import Image, ImageDraw, ImageFont
@@ -111,6 +113,42 @@ def apply_vae_tiling(pipe, enabled: bool) -> None:
         vae.disable_tiling()
     elif hasattr(vae, "use_tiling"):
         vae.use_tiling = False
+
+
+def model_sigmas(path: str | None, spec: dict[str, Any]) -> list[float] | None:
+    """The sampling schedule a checkpoint carries beside its own weights.
+
+    A distilled checkpoint may publish the recipe it was trained for as a
+    top-level key in ``model_index.json`` (Qwen-Image-2.1-Turbo ships
+    ``sample_sigmas``, eight values). The diffusers build this project runs does
+    not read that key — it derives a linear schedule from ``num_inference_steps``
+    whenever ``sigmas is None`` — so a run that only trusted the step field would
+    be a 40-step run wearing an 8-step label.
+
+    The catalogue entry names the key and carries a copy of the list. The file
+    wins when it is there and readable; the declared list answers for a
+    conversion that dropped it. Anything unreadable, non-list, or too short to be
+    a schedule falls through to that copy rather than failing a render.
+    """
+    name = spec.get("sigmas_from")
+    if name and path:
+        try:
+            payload = json.loads(
+                (Path(path) / "model_index.json").read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError):
+            payload = None
+        if isinstance(payload, dict):
+            values = payload.get(name)
+            if isinstance(values, list) and len(values) > 1:
+                try:
+                    return [float(value) for value in values]
+                except (TypeError, ValueError):
+                    pass
+    fallback = spec.get("sigmas_fallback")
+    if isinstance(fallback, list) and len(fallback) > 1:
+        return [float(value) for value in fallback]
+    return None
 
 
 class EngineError(RuntimeError):
@@ -669,6 +707,21 @@ class Engine:
                 if request.get("use_kv_cache") is not None
                 else DEFAULT_KV_CACHE
             )
+            # A distilled checkpoint is only correct on the recipe it was
+            # trained for, and three different callers can ask for a different
+            # one: the panel, a restored history record, and the API directly.
+            # So the lock sits here, after every normalisation above, rather
+            # than in any one client — the same discipline the reference-image
+            # rule follows. A model that declares nothing is untouched.
+            #
+            # These two fields and no others: they are exactly what the panel
+            # also mirrors, and a lock the studio could not show would be a
+            # silent change — the thing this is here to prevent.
+            locked = MODELS[model_key].get("locked_params") or {}
+            if "steps" in locked:
+                steps = int(locked["steps"])
+            if "true_cfg_scale" in locked:
+                cfg = float(locked["true_cfg_scale"])
             n_images = max(1, min(MAX_NUM_IMAGES, int(request.get("num_images") or 1)))
             enable_tiling = resolve_vae_tiling(request.get("vae_tiling"))
 
@@ -725,6 +778,10 @@ class Engine:
 
                     silence_int8_bf16_cast_warnings()
                 apply_vae_tiling(pipe, enable_tiling)
+                # Read from the snapshot that is really on disk, so a checkpoint
+                # that carries its own schedule uses it and one that lost it
+                # falls back to the catalogue's copy.
+                sigmas = model_sigmas((self._loaded or {}).get("path"), MODELS[model_key])
                 callback({"type": "generate_start", "width": width, "height": height, "steps": steps})
                 images = self._run_pipe(
                     pipe,
@@ -741,6 +798,7 @@ class Engine:
                     n_images=n_images,
                     follow_ref=follow_ref,
                     callback=callback,
+                    sigmas=sigmas,
                 )
 
             duration_ms = int((time.time() - started) * 1000)
@@ -868,11 +926,17 @@ class Engine:
         n_images: int,
         follow_ref: bool,
         callback: ProgressFn,
+        sigmas: list[float] | None = None,
     ) -> list[Image.Image]:
         import torch
 
         sig = inspect.signature(pipe.__call__)
         names = set(sig.parameters)
+        # A supplied schedule *becomes* the step count — the scheduler takes its
+        # length from the array — so the progress total has to follow it rather
+        # than the field, or the bar would overrun or stall at the end.
+        use_sigmas = bool(sigmas) and "sigmas" in names
+        total_steps = len(sigmas) if use_sigmas else steps
 
         def on_step_end(pipe_ref, step, timestep, callback_kwargs):
             if self._cancel.is_set():
@@ -881,7 +945,9 @@ class Engine:
                 except Exception:
                     pass
             self._note_sample()
-            callback({"type": "generate_progress", "step": int(step) + 1, "total": steps})
+            callback(
+                {"type": "generate_progress", "step": int(step) + 1, "total": total_steps}
+            )
             return callback_kwargs
 
         generator = torch.Generator(device="cpu").manual_seed(seed)
@@ -904,6 +970,14 @@ class Engine:
             kwargs["output_resolution"] = output_resolution
         if "use_kv_cache" in names:
             kwargs["use_kv_cache"] = kv_cache
+        # Guarded by the same signature probe as every other optional kwarg. A
+        # distilled checkpoint's schedule is the recipe, so it is worth passing
+        # — but only to a pipeline that declares the parameter. Handing an
+        # unknown one a `sigmas` it does not accept is a TypeError at the worst
+        # possible moment.
+        if use_sigmas:
+            kwargs["sigmas"] = list(sigmas)
+            kwargs["num_inference_steps"] = len(sigmas)
         if "callback_on_step_end" in names:
             kwargs["callback_on_step_end"] = on_step_end
 

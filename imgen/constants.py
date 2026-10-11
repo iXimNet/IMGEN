@@ -55,6 +55,24 @@ NEGATIVE_PROMPT_PLACEHOLDER = (
     "blurry, low quality, distorted, deformed, watermark, extra limbs, extra text"
 )
 
+# The sampling schedule Qwen-Image-2.1-Turbo ships in its own `model_index.json`
+# under this key. The installed diffusers build does not read the key, so a run
+# that only trusted the step field would fall back to a 40-step linear schedule
+# and quietly miss the recipe the checkpoint was distilled for. Read from the
+# checkpoint when it is there; this list is what the studio falls back to when a
+# conversion drops it.
+TURBO_SIGMAS_KEY = "sample_sigmas"
+TURBO_SIGMAS = [
+    1.0,
+    0.978453,
+    0.95418,
+    0.926626,
+    0.89508,
+    0.845148,
+    0.704534,
+    0.414568,
+]
+
 MODELS: dict[str, dict] = {
     "qwen-image-2.1": {
         "key": "qwen-image-2.1",
@@ -76,6 +94,89 @@ MODELS: dict[str, dict] = {
         "notes_en": "Official BF16 weights. Native 2K, unified generate/edit, up to 10 refs, RGBA.",
         "requires_cuda": False,
         "int8": False,
+    },
+    # The distilled sibling of the base weights. It is the same pipeline class
+    # with the same call signature and a full checkpoint — not a LoRA — so it
+    # reuses the bf16 loader untouched. The one real difference is the recipe:
+    # eight steps and a schedule the checkpoint carries itself, which is what
+    # `locked_params` and `sigmas_from` below declare.
+    "qwen-image-2.1-turbo": {
+        "key": "qwen-image-2.1-turbo",
+        "label": "Qwen-Image-2.1-Turbo",
+        "precision": "BF16",
+        "loader": "bf16",
+        # Measured from the hub's own file table: 30.21 GiB of weights, and the
+        # catalogue quotes decimal GB (the base entry's 33.1 is its 30.84 GiB).
+        "approx_gb": 32.4,
+        "repos": {
+            "huggingface": "Qwen/Qwen-Image-2.1-Turbo",
+            "modelscope": "Qwen/Qwen-Image-2.1-Turbo",
+        },
+        "urls": {
+            "huggingface": "https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo",
+            "modelscope": "https://modelscope.cn/models/Qwen/Qwen-Image-2.1-Turbo",
+            "github": "https://github.com/QwenLM/Qwen-Image-2.1",
+        },
+        "notes_zh": (
+            "BF16 8 步蒸馏加速版，采样配方随权重内置。CFG 固定为 1，负向提示词不参与。"
+            "许可证为 Qwen Research，仅限非商用。"
+        ),
+        "notes_en": (
+            "BF16 8-step distilled build. The sampling schedule ships with the weights. "
+            "CFG is fixed at 1, so negative prompts do not apply. "
+            "Qwen Research licence — non-commercial use only."
+        ),
+        # Values the run will use whatever the request asked for. They are not
+        # preferences: a distilled checkpoint is only correct on its own recipe,
+        # so the engine re-applies these after every normalisation. A model
+        # without this key behaves exactly as it did before.
+        "locked_params": {"steps": 8, "true_cfg_scale": 1.0},
+        "sigmas_from": TURBO_SIGMAS_KEY,
+        "sigmas_fallback": TURBO_SIGMAS,
+        "requires_cuda": False,
+        "int8": False,
+    },
+    # The INT8 conversion of the distilled checkpoint, so it carries both
+    # halves: the eight-step recipe (declared exactly as the BF16 Turbo above,
+    # and the converter did keep `sample_sigmas` in the release) and the
+    # quantised loader. Everything the studio does with the recipe is keyed off
+    # those two declarations, not off the model key, so nothing else has to
+    # learn about a fifth entry.
+    #
+    # The release asks for a pinned diffusers commit that reads
+    # `sample_sigmas` on its own. This project does not need it and does not
+    # upgrade for it: the schedule is passed in explicitly, which arrives at the
+    # same eight values on the build already installed.
+    "image21-turbo-int8": {
+        "key": "image21-turbo-int8",
+        "label": "Image21-Turbo-INT8",
+        "precision": "INT8",
+        "loader": "int8",
+        # 17.25 GiB of weights, and the release's own table quotes decimal GB
+        # (18.527), the same unit the other two entries already use.
+        "approx_gb": 18.5,
+        "repos": {
+            "huggingface": "ixim/Image21-Turbo-INT8",
+            "modelscope": "iximbox/Image21-Turbo-INT8",
+        },
+        "urls": {
+            "huggingface": "https://huggingface.co/ixim/Image21-Turbo-INT8",
+            "modelscope": "https://modelscope.cn/models/iximbox/Image21-Turbo-INT8",
+        },
+        "notes_zh": (
+            "ixim 社区 INT8 转换的 Turbo 版，8 步采样配方随权重内置。CFG 固定为 1，负向提示词不参与。"
+            "仅 NVIDIA CUDA。许可证为 Qwen Research，仅限非商用。"
+        ),
+        "notes_en": (
+            "Community INT8 conversion of Turbo by ixim. The eight-step recipe ships with the "
+            "weights. CFG is fixed at 1, so negative prompts do not apply. NVIDIA CUDA only. "
+            "Qwen Research licence — non-commercial use only."
+        ),
+        "locked_params": {"steps": 8, "true_cfg_scale": 1.0},
+        "sigmas_from": TURBO_SIGMAS_KEY,
+        "sigmas_fallback": TURBO_SIGMAS,
+        "requires_cuda": True,
+        "int8": True,
     },
     "image21-int8": {
         "key": "image21-int8",
