@@ -1074,9 +1074,13 @@
     $("stepsNum").value = S.steps;
     $("cfg").value = S.cfg;
     $("cfgNum").value = S.cfg.toFixed(1);
-    $("seed").value = item.seed != null ? item.seed : "";
-    // Reusing a run carries its seed, and that write is not typing: the hint /
-    // clear pair has to be re-read or the field would claim to be empty.
+    /* A generation hands its seed over — replaying one is the whole point of
+       having pinned it. An 改图 does not: re-running an edit with the seed that
+       produced the reference drives the sampler to over-sharpen the picture, so
+       the record leaves the field empty and the next run picks its own. The
+       write stays unconditional because the hint / clear pair is re-read below,
+       and "empty" is itself the value that has to land there. */
+    $("seed").value = item.seed == null || item.mode === "edit" ? "" : item.seed;
     renderSeed();
     $("nImages").value = p.num_images || 1;
     $("kv").setAttribute("aria-checked", p.use_kv_cache === false ? "false" : "true");

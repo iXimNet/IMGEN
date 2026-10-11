@@ -1208,3 +1208,28 @@ def test_the_seed_well_states_its_own_contents(client):
     # The clear button is a real control, named in both languages.
     assert "seedClear" in i18n and i18n.count("seedClear:") == 2
     assert "$(\"seedClear\").setAttribute(\"aria-label\", tr(\"seedClear\"))" in js
+
+
+def test_reuse_does_not_carry_an_edit_seed(client):
+    """复用参数 keeps a generation's seed but must drop an 改图's.
+
+    A pinned seed is what makes a *generation* replayable, so reusing a record
+    has to hand it over there. An edit is the opposite case: re-running it with
+    the seed that produced the reference drives the sampler to over-sharpen the
+    picture, and the defect only shows up on the second identical edit — after
+    the reference has already been trusted. So an edit record leaves the field
+    empty and the next run picks its own seed.
+
+    The behaviour lives in the DOM, which these tests do not drive; the contract
+    is asserted against the source, the same way the mode gate is.
+    """
+    js = client.get("/js/app.js").text.replace("\r\n", "\n")
+
+    body = js[js.index("function applyItemParams(item) {"):]
+    body = body[: body.index("renderSeed();")]
+    assert 'item.seed == null || item.mode === "edit" ? "" : item.seed' in body, (
+        "an edit must not pin the record's seed; a generation still may"
+    )
+    assert "item.seed != null ? item.seed" not in js, (
+        "the unconditional carry-over is the bug this guards against"
+    )
