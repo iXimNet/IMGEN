@@ -20,6 +20,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pytest pillow fastapi "uvicorn[standard]" python-multipart httpx pydantic
+          # The engine imports torch at runtime and a good many tests drive those
+          # paths, so the suite cannot run without it. requirements.txt leaves it
+          # out on purpose -- the studio's build is the user's to choose -- so CI
+          # takes the CPU wheel, the smallest one that makes the code importable.
+          # Without it the run dies during collection and never executes a test.
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Test
         run: pytest -q
       - name: Prompt catalog size

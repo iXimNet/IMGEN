@@ -11,8 +11,15 @@ event shape, and a restart never leaves phantom "running" rows behind.
 import time
 
 import pytest
-import torch
 from PIL import Image
+
+# This whole module needs torch: the split-VAE tests build real modules, and the
+# `_run_pipe` tests reach the engine's own runtime import of it. torch is
+# installed by hand rather than by pip (see README), so a checkout without it
+# should skip these tests — a bare `import torch` here aborted collection for
+# the entire suite, which reported one missing optional dependency as "0 tests
+# ran, 1 error" and hid every other module behind it.
+torch = pytest.importorskip("torch")
 
 fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
