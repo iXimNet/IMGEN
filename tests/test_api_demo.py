@@ -51,6 +51,24 @@ def test_index_page(client):
     assert ".kv" in css.text
 
 
+def test_the_panel_never_reuses_a_stale_bundle(client):
+    """Static assets revalidate on every load.
+
+    Without a `Cache-Control` header the browser may apply heuristic freshness,
+    so a tab left open across an upgrade can keep running the old app.js while
+    the WebSocket feeds it new data — the panel then shows a mix of both.  The
+    header has to be on every asset the page pulls in, not just the HTML.
+    """
+    for url in ("/", "/js/app.js", "/js/i18n.js", "/css/app.css"):
+        assert client.get(url).headers["cache-control"] == "no-cache", url
+    # A revalidation that finds nothing new still answers 304, so the fix costs
+    # a round trip rather than 157 KB per load.
+    etag = client.get("/js/app.js").headers["etag"]
+    again = client.get("/js/app.js", headers={"If-None-Match": etag})
+    assert again.status_code == 304
+    assert again.headers["cache-control"] == "no-cache"
+
+
 def test_health_and_bootstrap(client):
     health = client.get("/api/health").json()
     assert health["ok"] is True

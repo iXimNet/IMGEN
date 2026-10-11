@@ -51,6 +51,32 @@ from .sizes import catalog as size_catalog
 
 STATIC_DIR = Path(__file__).parent / "static"
 
+
+class NoCacheStaticFiles(StaticFiles):
+    """Serve the panel's own files with "check with me first".
+
+    The bundle ships inside the package, but a tab left open across an upgrade
+    keeps running the old code while the WebSocket happily feeds it data from
+    the new one — the two halves disagree, and the panel reports the wrong
+    thing (a Turbo checkpoint showing 40 steps is how this was found).  Plain
+    `Cache-Control` absence lets the browser apply heuristic freshness, so even
+    a normal refresh can reuse the stale file.  `no-cache` keeps the copy but
+    forces a revalidation round trip before every reuse, which the ETag
+    handles; only files that actually changed come back over the wire.
+    """
+
+    def file_response(
+        self,
+        full_path: Any,
+        stat_result: Any,
+        scope: Any,
+        status_code: int = 200,
+    ) -> Any:
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 # A job id is 16 hex characters (`new_id`), and an extra frame appends `_<n>`.
 # The output/thumb routes join the id onto a folder, so the shape is checked
 # before the join — anything else could climb out of it.
@@ -645,6 +671,6 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
             bus.unsubscribe(queue)
 
     if STATIC_DIR.exists():
-        app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+        app.mount("/", NoCacheStaticFiles(directory=STATIC_DIR, html=True), name="static")
 
     return app
