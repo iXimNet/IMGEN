@@ -5,10 +5,59 @@
   "use strict";
 
   /* ======================================================================
+     Language
+     ====================================================================== */
+  /* Which language a first launch speaks. The browser is the only judge on a
+     fresh install, and its answer is not cached — a reader who changes their
+     browser language should see that change. A picked language is different:
+     it is cached here as well as in config, so the first frame of the next
+     launch is already right instead of flipping once `/api/bootstrap` lands.
+     `config.language` stays the source of truth; the cache never outranks it.
+
+     This sits above `S` because `S.lang` is built from it: a `const` read from
+     a function called during that initialisation would still be in its
+     temporal dead zone, and the `try` below would quietly answer "no cache". */
+  const LANG_CACHE = "imgen.lang";
+
+  function cachedLang() {
+    try {
+      const value = localStorage.getItem(LANG_CACHE);
+      return value === "zh" || value === "en" ? value : "";
+    } catch (err) {
+      // Private mode, storage disabled, or a sandboxed origin: the interface
+      // still works, it just loses the head start.
+      return "";
+    }
+  }
+
+  function rememberLang(lang) {
+    try {
+      localStorage.setItem(LANG_CACHE, lang);
+    } catch (err) {
+      /* Nothing to do — the next launch falls back to the browser. */
+    }
+  }
+
+  /* Chinese tag, Chinese interface; English and every third language get
+     English, which is the one fallback that reads as a choice rather than as
+     a half-translated interface. */
+  function browserLang() {
+    const tags =
+      navigator.languages && navigator.languages.length
+        ? navigator.languages
+        : [navigator.language || ""];
+    return /^zh/i.test(String(tags[0] || "")) ? "zh" : "en";
+  }
+
+  function detectLang() {
+    return cachedLang() || browserLang();
+  }
+
+  /* ======================================================================
      State
      ====================================================================== */
   const S = {
-    lang: "zh",
+    lang: detectLang(),
     bootstrap: null,
     mode: "generate",
     /* One parameter set per mode. Switching modes swaps the whole panel, so
@@ -218,12 +267,18 @@
     return type.includes("application/json") ? res.json() : res;
   }
 
-  const putConfig = (patch) =>
-    api("/api/config", {
+  /* Saving a language is the moment a choice becomes the reader's own, so it
+     is also the moment to cache it: the next launch paints the first frame in
+     that language instead of waiting for `/api/bootstrap`. One hook here
+     covers the top bar, the first-run sheet and the sheet's final save. */
+  const putConfig = (patch) => {
+    if (patch && patch.language) rememberLang(patch.language);
+    return api("/api/config", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     });
+  };
 
   /* ======================================================================
      Toasts — a human line first, backend detail underneath
@@ -415,15 +470,25 @@
      `data-i` and be painted here instead. */
   function paintI18n(root) {
     $$("[data-i]", root).forEach((el) => { el.textContent = tr(el.getAttribute("data-i")); });
+    // Placeholders and the wordmark's accessible name are text too, and the
+    // first frame should not show one language in the boxes and another in
+    // the labels above them.
+    $$("[data-i-placeholder]", root).forEach((el) => {
+      el.placeholder = tr(el.getAttribute("data-i-placeholder"));
+    });
+    $$("[data-i-alt]", root).forEach((el) => { el.alt = tr(el.getAttribute("data-i-alt")); });
+  }
+
+  /* Screen readers and hyphenation follow the document's language, not the
+     copy on screen, so this is set wherever the interface language is. */
+  function setDocLang() {
+    document.documentElement.lang = S.lang === "zh" ? "zh-Hans" : "en";
   }
 
   function applyI18n() {
-    document.documentElement.lang = S.lang === "zh" ? "zh-Hans" : "en";
-    $$("[data-i]").forEach((el) => { el.textContent = tr(el.getAttribute("data-i")); });
-    $$("[data-i-placeholder]").forEach((el) => { el.placeholder = tr(el.getAttribute("data-i-placeholder")); });
-    // Some nodes carry their text in an attribute rather than as content — the
-    // brand wordmark is an image, so its accessible name is the `alt`.
-    $$("[data-i-alt]").forEach((el) => { el.alt = tr(el.getAttribute("data-i-alt")); });
+    setDocLang();
+    // The same pass the first frame uses, so the two cannot drift apart.
+    paintI18n(document);
     $("negative").placeholder = defaults().negative_placeholder || tr("negativePh");
     $("historySearch").placeholder = tr("searchHistory");
     $("presetSearch").placeholder = tr("presetsSearch");
@@ -2300,7 +2365,7 @@
           const res = await api("/api/weights/pick-dir", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({}),
+            body: JSON.stringify({ language: S.lang }),
           });
           if (res && res.ok && res.path) {
             await addWeightDir(res.path);
@@ -3132,7 +3197,11 @@
   async function refreshBootstrap() {
     S.bootstrap = await api("/api/bootstrap");
     const config = cfg();
-    S.lang = config.language || S.lang;
+    // A stored choice is a real decision and outranks the browser. With no
+    // stored value nobody has picked yet, so the browser decides again — on
+    // this launch as on every launch.
+    S.lang = config.language || browserLang();
+    if (config.language) rememberLang(S.lang);
     S.hub = config.hub || S.hub;
     S.modelKey = config.model_key || S.modelKey;
     renderEnv();
@@ -3625,6 +3694,13 @@
      Init
      ====================================================================== */
   async function init() {
+    // The skeleton in index.html is written in one language. Repaint it before
+    // the first frame — `paintI18n` needs nothing but the dictionary, unlike
+    // `applyI18n`, which re-runs renderers that need bootstrap — so an English
+    // reader never watches the labels flip while the first request is in
+    // flight.
+    paintI18n(document);
+    setDocLang();
     bind();
     try {
       await refreshBootstrap();

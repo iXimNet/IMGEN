@@ -305,7 +305,7 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
         return describe_weight_dir(payload.get("path") or "")
 
     @app.post("/api/weights/pick-dir")
-    async def pick_weight_dir() -> dict[str, Any]:
+    async def pick_weight_dir(payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Open the OS folder picker and describe the chosen folder.
 
         The dialog blocks its own worker thread, not the event loop, and only
@@ -316,7 +316,11 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
         if not pick_dir_lock.acquire(blocking=False):
             raise HTTPException(409, "A folder picker is already open.")
         try:
-            language = str(config._data.get("language") or "zh").lower()
+            # The caller sends what it is showing: a first launch may be in the
+            # browser's language while the stored config is still empty, and a
+            # native dialog titled in the other language looks like a bug.
+            asked = str((payload or {}).get("language") or "").strip().lower()
+            language = asked or str(config._data.get("language") or "zh").lower()
             title = "选择权重目录" if language == "zh" else "Choose a weights folder"
 
             def _pick() -> str | None:

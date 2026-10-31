@@ -10,7 +10,11 @@ from typing import Any
 from .paths import AppPaths
 
 DEFAULTS: dict[str, Any] = {
-    "language": "zh",
+    # Empty means "the reader has never picked one": the interface takes the
+    # browser's language on load (Chinese for a Chinese tag, English for
+    # everything else) and keeps doing so on every launch. Picking a language
+    # writes it here, and from then on the stored value wins over the browser.
+    "language": "",
     "hub": "huggingface",
     "model_key": "qwen-image-2.1",
     "setup_completed": False,

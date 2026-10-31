@@ -1,4 +1,4 @@
-# <img src="imgen/static/brand/imgen-wordmark.png" alt="IMGEN" width="360" height="88">
+# <picture><source media="(prefers-color-scheme: dark)" srcset="imgen/static/brand/imgen-wordmark-dark.png"><img src="imgen/static/brand/imgen-wordmark.png" alt="IMGEN" width="360" height="88"></picture>
 
 Local visual studio for **Qwen-Image-2.1** — generate from text, edit with up to **10 reference images**, and keep every run in a searchable history. Supports the official BF16 weights, the official **8-step Turbo** build, and three community quantisations.
 
@@ -19,6 +19,8 @@ Not Gradio. A FastAPI backend with a purpose-built interface. Runs on **Windows*
 - **Multi-reference editing.** Up to 10 images, ordered the way the model reads them. Optional “follow last reference aspect”.
 - **Preset library.** 14 generate categories and 5 edit categories — portraits, landscapes, product, Chinese/English lettering, stickers, interiors, multi-ref composites, and more.
 - **History with full parameters.** Prompt, seed, size, steps, CFG, model, hub, duration, and reference images. Restore any run.
+- **Favorites.** Star a run from its detail view and it stays at hand; a filter beside the history search then lists only starred runs, with search still applying inside it.
+- **Chinese and English interface.** One button in the top bar switches the studio's own labels, hints and date formats; the preset prompt text stays in the language it was written in. A first launch follows the browser — Chinese opens in Chinese, anything else in English — and the choice you make is remembered.
 - **Windows and macOS.** CUDA on NVIDIA; Apple Silicon via MPS for BF16 and INT4. The two INT8 entries (Image21-INT8 and Image21-Turbo-INT8) are CUDA-only.
 - **Demo mode.** `python -m imgen --demo` opens the full UI without downloading 30 GB of weights.
 

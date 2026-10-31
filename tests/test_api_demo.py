@@ -948,6 +948,24 @@ def test_brand_wordmark_is_served_transparent(client):
     assert max(plain_avg) < 60, "the README variant should stay near-black"
 
 
+def test_the_readme_wordmark_follows_the_reader_theme():
+    """A media query cannot reach `img src`, so `<picture>` is the only way a
+    README can offer the reversed artwork. Both files already ship — the brand
+    test above checks their polarity — so this guards the wiring, not the ink.
+    """
+    from pathlib import Path
+
+    readme_path = Path(__file__).resolve().parents[1] / "README.md"
+    first = readme_path.read_text(encoding="utf-8").splitlines()[0]
+    assert first.startswith("# <picture>"), "the header must be a themed picture, not a bare img"
+    assert 'media="(prefers-color-scheme: dark)"' in first
+    assert "imgen/static/brand/imgen-wordmark-dark.png" in first
+    # The light file is the default, so a reader without the media query still
+    # gets an image rather than a transparent hole.
+    assert 'src="imgen/static/brand/imgen-wordmark.png"' in first
+    assert 'alt="IMGEN"' in first
+
+
 def test_weight_dirs_normalisation(tmp_path):
     from imgen.config import ConfigStore, normalize_weight_dirs
     from imgen.paths import AppPaths
@@ -1422,3 +1440,76 @@ def test_the_star_on_a_row_only_reports_state(client):
         assert i18n.count(f"\n    {key}:") == 2, key
     assert "点任意一行右侧的星标" not in i18n
     assert "Star any row" not in i18n
+
+
+def test_a_first_launch_takes_its_language_from_the_browser(client):
+    """A fresh install has no language opinion of its own: the browser has one.
+
+    `language` stays empty until the reader picks a value, so the old fixed
+    "zh" default made an English browser open a Chinese interface on first run.
+    A stored value still has to outrank the browser, or the top-bar switch
+    would be undone on the next launch.
+    """
+    from imgen.config import DEFAULTS
+
+    assert DEFAULTS["language"] == "", (
+        "a fixed default takes the decision away from the browser"
+    )
+
+    js = client.get("/js/app.js").text.replace("\r\n", "\n")
+
+    detect = js[js.index("function browserLang("):]
+    detect = detect[: detect.index("\n  }")]
+    # Chinese for a Chinese tag; English for an English tag and for every
+    # third language, which is the fallback that reads as a choice rather
+    # than as a half-translated interface.
+    assert 'return /^zh/i.test(String(tags[0] || "")) ? "zh" : "en";' in detect
+
+    # The state starts from that answer instead of the build's locale …
+    assert "lang: detectLang()," in js
+    # … bootstrap lets a stored choice outrank it, and otherwise asks the
+    # browser again rather than keeping whatever the last launch cached.
+    assert "S.lang = config.language || browserLang();" in js
+    assert "if (config.language) rememberLang(S.lang);" in js
+
+    # A choice has to be cached where the next first frame can read it, and
+    # only a real choice may be: caching the browser's answer would turn a
+    # detected language into a stored one.
+    assert "return cachedLang() || browserLang();" in js
+    assert 'const LANG_CACHE = "imgen.lang";' in js
+    assert "if (patch && patch.language) rememberLang(patch.language);" in js
+
+    # The cache helpers must exist before `S` is built from them. A `const`
+    # read during that call sits in its temporal dead zone, and the guard
+    # `try` inside `cachedLang` would answer "no cache" without a word — the
+    # exact shape of a silent failure.
+    assert js.index('const LANG_CACHE = "imgen.lang";') < js.index("const S = {")
+
+    # The skeleton is written in Chinese, so it is repainted before the first
+    # frame — not after the first request, or an English reader watches the
+    # labels flip.
+    init = js[js.index("async function init()"):]
+    init = init[: init.index("\n  }")]
+    assert init.index("paintI18n(document);") < init.index("await refreshBootstrap()")
+    assert init.index("setDocLang();") < init.index("await refreshBootstrap()")
+
+    # The native folder dialog is titled by the caller for the same reason: on
+    # a first launch the stored config has no answer to give.
+    assert "JSON.stringify({ language: S.lang })" in js
+
+
+def test_the_readme_claims_an_interface_language_not_a_translated_library():
+    """Bilingual means the studio's own words, not the preset prompts.
+
+    The preset library ships prompts written in one language each; promising
+    that "every preset" follows the switch would be a promise the app does not
+    keep.
+    """
+    from pathlib import Path
+
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(
+        encoding="utf-8"
+    )
+    assert "**Chinese and English interface.**" in readme
+    assert "the preset prompt text stays in the language it was written in" in readme
+    assert "Every label, hint, preset and date format" not in readme
