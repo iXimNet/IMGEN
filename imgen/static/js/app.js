@@ -54,6 +54,9 @@
     historyQuery: "",
     historyTotal: 0,
     historyLoading: false,
+    /* Whether the list is narrowed to the starred records. A filter on the same
+       list, not a separate collection: search and paging still apply. */
+    historyFav: false,
     presetCat: null,
     detailId: null,
     /* Which picture the open detail overlay is showing — a frame of the run or
@@ -401,6 +404,7 @@
     renderDetailMeta(item);
     renderDetailRefs(item);
     renderDetailFooter(item);
+    renderDetailFav(item);
     // The blocks are rebuilt, so their fold state has to be re-established.
     wirePromptFolds();
   }
@@ -907,6 +911,16 @@
   function renderHistory() {
     const box = $("historyList");
     if (!box) return;
+    // The filter toggle is painted here like every other readout: it has no
+    // `data-i` text of its own, and its label names the next click rather than
+    // the current state, so a language switch has to repaint it.
+    const favToggle = $("histFav");
+    if (favToggle) {
+      favToggle.classList.toggle("on", S.historyFav);
+      favToggle.setAttribute("aria-pressed", S.historyFav ? "true" : "false");
+      favToggle.title = tr("favFilter");
+      favToggle.setAttribute("aria-label", tr("favFilter"));
+    }
     box.innerHTML = "";
     const items = filteredHistory();
     if (!items.length) {
@@ -914,6 +928,10 @@
       // instead of claiming the list is empty.
       if (S.historyLoading) {
         box.innerHTML = `<p class="hint-row">${esc(tr("loadingMore"))}</p>`;
+      } else if (S.historyFav && !S.historyQuery) {
+        // An empty shelf is not an empty studio: the records exist, they are
+        // just not starred. Say what to do about it.
+        box.innerHTML = `<p class="hint-row">${esc(tr("historyFavEmpty"))}</p>`;
       } else {
         box.innerHTML = S.historyQuery
           ? `<p class="hint-row">${esc(tfx("historyNoMatch", { q: S.historyQuery }))}</p>`
@@ -943,6 +961,15 @@
       // only show one of them, and "there are three more" is the useful fact.
       const count = item.output_count || 1;
 
+      // The star reports state here; it does not write one. Opening a record is
+      // a click on the row, and the row is what surrounds this glyph — a stray
+      // tap aimed at "open this picture" must not rewrite it instead. Writing
+      // lives where a mis-tap costs nothing: the detail header and the filter.
+      // It rides in the metadata line just ahead of the clock — that line had
+      // room to spare, while a column of its own cost the title 36px of width.
+      // The glyph stays visible when off (dimmed) rather than appearing on
+      // hover, so the row reads the same under a finger as under a mouse.
+      const favState = item.favorite ? tr("favMarked") : tr("favUnmarked");
       const row = document.createElement("div");
       row.className = `hrow${S.detailId === item.id ? " on" : ""}`;
       row.dataset.id = item.id;
@@ -953,9 +980,13 @@
         `${count > 1 ? `<i class="thcount">×${count}</i>` : ""}</div>` +
         `<div class="mt"><b title="${esc(title)}">${esc(title)}</b>` +
         `<span class="mrow">${meta.map((part) => `<i>${esc(part)}</i>`).join("")}` +
+        `<i class="hfav${item.favorite ? " on" : ""}" role="img" aria-label="${esc(favState)}" title="${esc(favState)}">${icon("i-star", 12)}</i>` +
         `<i class="when" title="${esc(fullTime(item.created_at))}">${esc(clockOf(item.created_at))}</i></span></div>`;
       row.onclick = () => openDetail(item);
       row.onkeydown = (event) => {
+        // Only the row itself opens the record; a focusable child would keep
+        // its own keys, which is why this is not an unconditional handler.
+        if (event.target !== row) return;
         if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openDetail(item); }
       };
       box.appendChild(row);
@@ -994,6 +1025,7 @@
     const query = S.historyQuery || "";
     const params = new URLSearchParams({ limit: String(HISTORY_PAGE), offset: String(offset) });
     if (query) params.set("q", query);
+    if (S.historyFav) params.set("fav", "1");
     S.historyLoading = true;
     renderHistory();
     try {
@@ -1008,6 +1040,53 @@
   }
 
   const historyHasMore = () => S.history.length < S.historyTotal;
+
+  /* Starring is a write on the record, so the row, the detail panel and the
+     server all have to end up saying the same thing. The request carries the
+     value it wants rather than "toggle", so a double click cannot leave the two
+     sides out of step. */
+  async function toggleFavorite(item) {
+    if (!item || !item.id) return;
+    const wanted = !item.favorite;
+    let answer;
+    try {
+      answer = await api(`/api/jobs/${item.id}/favorite`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: wanted }),
+      });
+    } catch (err) {
+      return reportError(err);
+    }
+    item.favorite = !!answer.favorite;
+    toast("ok", tr(item.favorite ? "favOn" : "favOff"));
+    renderDetailFav(item);
+    // Unstarring inside the favourites view removes the row from that view: it
+    // no longer matches the filter. The overlay goes with it, for the same
+    // reason deleting a record closes it — the thing on screen is gone from
+    // here. Everywhere else the row simply loses its star and stays put.
+    if (S.historyFav && !item.favorite) {
+      S.history = S.history.filter((row) => row.id !== item.id);
+      S.historyTotal = Math.max(0, S.historyTotal - 1);
+      if (S.detailId === item.id) closeDetail();
+      else renderHistory();
+      return;
+    }
+    renderHistory();
+  }
+
+  /* The star in the detail header follows the same record the panel is showing.
+     It is a fixed node in the markup, so this only ever repaints it. */
+  function renderDetailFav(item) {
+    const btn = $("dFav");
+    if (!btn) return;
+    const on = !!(item && item.favorite);
+    btn.classList.toggle("on", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    const label = on ? tr("unfavorite") : tr("favorite");
+    btn.title = label;
+    btn.setAttribute("aria-label", label);
+  }
 
   /* The name a saved picture lands under.
 
@@ -1130,6 +1209,7 @@
     renderDetailRefs(item);
     showDetailSource(item, 0, null);
     renderDetailFooter(item);
+    renderDetailFav(item);
     $("detail").classList.remove("hidden");
     // Only measurable once the overlay is displayed.
     wirePromptFolds();
@@ -3436,6 +3516,16 @@
     $("sendEditBtn").onclick = () => sendToEdit(S.currentImage);
 
     /* History */
+    $("histFav").onclick = () => {
+      S.historyFav = !S.historyFav;
+      // Reload from the top: the filter changes which records belong to the
+      // list, so a page appended under the old view would be the wrong rows.
+      loadHistory().catch(reportError);
+    };
+    $("dFav").onclick = () => {
+      const item = S.history.find((row) => row.id === S.detailId);
+      if (item) toggleFavorite(item);
+    };
     $("historySearch").addEventListener("input", () => {
       S.historyQuery = ($("historySearch").value || "").trim();
       // Searching runs on the server so it reaches records past the first page.

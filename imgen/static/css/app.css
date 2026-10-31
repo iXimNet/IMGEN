@@ -529,7 +529,13 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; ma
 /* ==========================================================================
    History
    ========================================================================== */
-.hsearch { flex: none; padding: 12px 12px 10px; border-bottom: 1px solid var(--line); }
+.hsearch { flex: none; display: flex; align-items: center; gap: 6px; padding: 12px 12px 10px; border-bottom: 1px solid var(--line); }
+.hsearch .searchwrap { flex: 1; min-width: 0; }
+/* The filter toggle is an `.icon-btn`, so it matches the header's icons; only
+   its "on" colour differs — a starred view is the one thing here that is
+   marked, and the safelight is what marks things in this app. */
+.hsearch .icon-btn.on { color: var(--accent); background: var(--sel); }
+.hsearch .icon-btn.on .ico { fill: currentColor; }
 .searchwrap { position: relative; }
 .searchwrap .ico { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--ink-faint); }
 .searchwrap input { padding-left: 32px; font-family: var(--font); font-size: 13px; }
@@ -537,16 +543,27 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; ma
 .hlist { padding: 6px 8px 14px; display: grid; gap: 1px; align-content: start; }
 .hday { font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.08em; color: var(--ink-faint); padding: 12px 6px 7px; }
 .hrow { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 10px; align-items: center; padding: 7px 6px; border-radius: 8px; text-align: left; position: relative; cursor: pointer; }
+/* The star reports state; it is not a control. So it has no hit area of its own
+   and no hover response — a pointer resting on it must not suggest a target a
+   pixel away from "open this record". It sits in the metadata line, immediately
+   before the clock, so it costs the row no column of its own: the box stretches
+   to that line's height and the glyph is a shade smaller, so the two read as one
+   height. Off stays visible but dim, so the column still scans as a column. */
+.hrow .hfav { width: 14px; margin-left: auto; margin-right: -2px; display: inline-flex; align-items: center; justify-content: center; align-self: stretch; color: var(--ink-faint); opacity: 0.42; flex: none; }
+.hrow .hfav.on { color: var(--accent); opacity: 1; }
+.hrow .hfav.on .ico { fill: currentColor; }
 .hrow:hover, .hrow:focus-visible { background: var(--sel); }
 .hrow.on { background: var(--sel); box-shadow: inset 0 0 0 1px var(--sel-line); }
 .hrow .th { width: 46px; height: 46px; border-radius: 6px; background: #101214; box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; position: relative; }
 .hrow .th img { width: 100%; height: 100%; object-fit: cover; }
 .hrow .mt { min-width: 0; }
 .hrow .mt b { display: block; font-size: 12.5px; font-weight: 450; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px; }
-/* Second line: parts on the left, clock pushed to the right edge. */
+/* Second line: parts left, then the star and the clock as one right-hand pair.
+   The star carries the `margin-left: auto` now, so the push-to-the-edge lives
+   on the pair rather than on the clock alone. */
 .hrow .mt .mrow { display: flex; align-items: baseline; gap: 7px; font-family: var(--mono); font-size: 11px; color: var(--ink-dim); min-width: 0; }
 .hrow .mt .mrow i { font-style: normal; flex: none; white-space: nowrap; }
-.hrow .mt .mrow .when { margin-left: auto; color: var(--ink-faint); }
+.hrow .mt .mrow .when { color: var(--ink-faint); }
 .hlist .hint-row { font-size: 12.5px; color: var(--ink-dim); line-height: 1.6; padding: 14px 6px; }
 /* Paging footer: a button while more exists, a quiet line once it does not. */
 .hmore { display: grid; justify-items: center; padding: 12px 6px 4px; }
@@ -699,6 +716,10 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 18px; ma
 .dpanel { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; background: var(--surface); }
 .dpanel-head { display: flex; align-items: center; gap: 4px; padding: 10px 10px 10px 18px; border-bottom: 1px solid var(--line); min-width: 0; }
 .dpanel-head h3 { font-size: 15px; font-weight: 600; margin: 0; flex: none; letter-spacing: 0.01em; }
+/* Same mark as the list row, same colour when on — the two views read one
+   field, so they should look like it. */
+.dpanel-head .icon-btn.on { color: var(--accent); }
+.dpanel-head .icon-btn.on .ico { fill: currentColor; }
 .dpanel-body { min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 14px 18px 16px; }
 .dpanel-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 11px 16px; border-top: 1px solid var(--line); background: rgba(0, 0, 0, 0.16); }
 /* Delete stands apart from the two actions that act on the picture: it is the

@@ -295,6 +295,51 @@ server — see **Multi-image runs** below.
   the narrow layout, the delete confirmation, a four-frame record and
   fill-the-window.
 
+### Favorites
+- **A record can be starred, and the list narrowed to the stars.** The mark is a
+  column on the record (`favorite`), not a second collection and not a copy: a
+  copy would drift the moment the original was edited or deleted, and the two
+  views would then disagree about the same picture. `GET /api/jobs` takes `fav=1`
+  as one more `WHERE` term, so search, paging and ordering keep working inside
+  the filtered view — and `total` counts the narrowed set, which is what the
+  "load more" footer needs to stay honest.
+- **Starring is idempotent: the request carries the value it wants.**
+  `POST /api/jobs/{id}/favorite` with `{"value": true|false}`; a body-less call
+  stars it, so `curl -X POST` does the obvious thing. A toggle endpoint would let
+  a double click leave the row and the server out of step. An unknown id is a
+  404 — a favourite is a property of a record, not a record of its own.
+- **Existing databases gain the column on startup.** `CREATE TABLE IF NOT
+  EXISTS` will not reshape a table it finds, so a studio that has been running
+  since before this column existed would keep the old schema and fail at the
+  first query naming it. `History._migrate` adds it in place; records written
+  before it read as "not starred", never NULL.
+- Interface: a mark on every history row — inside the metadata line, just ahead
+  of the clock, so it costs the row no column of its own (dimmed when off rather
+  than revealed on hover — rows are reachable by touch and keyboard too) — a
+  filter toggle beside the search box, and the star in the detail header. The
+  two views read one field, so they cannot disagree.
+- **The row's star only reports state; it never writes one.** Opening a record is
+  a click on the row, and the mark sits inside that click target, so a star that
+  also toggled a favourite turned every slightly off-centre tap into a silent
+  edit of the record the user meant to open. It is now an `<i>` carrying
+  `role="img"` and a state label ("In favorites" / "Not in favorites"), with no
+  handler, no tab stop, no pressed state and no hover response — writing stays in
+  the detail header, where a mis-tap costs nothing. The empty shelf's hint moved
+  with it: it used to send people to a star they could no longer press.
+- Unstarring inside the filtered view takes the row out of that view and closes
+  the overlay — the thing on screen no longer belongs here — while the record
+  itself is untouched. An empty shelf says so instead of claiming the studio is
+  empty.
+- The star's box follows that line's height rather than fixing its own, and the
+  glyph dropped from 15px to 12px to match the 11px clock it sits beside.
+- Verified: 230 pytest cases (10 new), plus a real-Chromium run driving the
+  controls the user presses (click the row's mark, star from the detail, narrow
+  the list, unstar from the detail, clear the filter, switch language) — 15/15,
+  no page errors, and the mark left the record untouched through every click
+  aimed at it; measured in both languages, the star and the clock are 16.5px tall
+  on the same centre line, and the row is back to two cells with the title at
+  211px (was 175px while the star held a 26px column).
+
 ### Top bar
 - **New brand mark: an aperture ring around a glowing safelight core.** The old
   one was two CSS pseudo-elements — a flat tile with a plain dot — which said

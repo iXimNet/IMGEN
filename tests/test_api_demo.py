@@ -1247,3 +1247,178 @@ def test_reuse_does_not_carry_an_edit_seed(client):
     assert "item.seed != null ? item.seed" not in js, (
         "the unconditional carry-over is the bug this guards against"
     )
+
+
+def test_a_record_can_be_starred_and_the_list_narrowed_to_stars(client):
+    """The star is a property of the record, so both views read one field.
+
+    The list endpoint has to honour the same filter the panel sends, and its
+    `total` has to agree with the page — otherwise "load more" would offer pages
+    that are not there.
+    """
+    plain = _run_generate(client, prompt="unstarred probe")
+    starred = _run_generate(client, prompt="starred probe")
+    assert plain["favorite"] is False
+
+    resp = client.post(f"/api/jobs/{starred['id']}/favorite", json={"value": True})
+    assert resp.status_code == 200
+    assert resp.json()["favorite"] is True
+
+    # The record itself carries the mark, not just the list response.
+    assert client.get(f"/api/jobs/{starred['id']}").json()["favorite"] is True
+
+    only = client.get("/api/jobs?fav=1").json()
+    ids = [row["id"] for row in only["items"]]
+    assert ids == [starred["id"]]
+    assert plain["id"] not in ids
+    assert only["total"] == len(only["items"]) == 1
+
+    # Taking it off is the same request with the other value.
+    off = client.post(f"/api/jobs/{starred['id']}/favorite", json={"value": False})
+    assert off.json()["favorite"] is False
+    assert client.get("/api/jobs?fav=1").json()["total"] == 0
+
+
+def test_a_bodyless_star_marks_the_record(client):
+    """`curl -X POST` with nothing to say should do the obvious thing."""
+    item = _run_generate(client, prompt="bodyless probe")
+    resp = client.post(f"/api/jobs/{item['id']}/favorite")
+    assert resp.status_code == 200
+    assert resp.json()["favorite"] is True
+
+
+def test_starring_a_record_that_does_not_exist_is_a_404(client):
+    """A favourite is a property, not a record — it cannot be created alone."""
+    assert client.post("/api/jobs/nosuchrecord/favorite", json={"value": True}).status_code == 404
+
+
+def test_the_star_filter_and_the_search_narrow_together(client):
+    keep = _run_generate(client, prompt="combined needle keep")
+    drop = _run_generate(client, prompt="combined needle drop")
+    client.post(f"/api/jobs/{keep['id']}/favorite", json={"value": True})
+
+    hit = client.get("/api/jobs?fav=1&q=combined needle").json()
+    assert [row["id"] for row in hit["items"]] == [keep["id"]]
+    assert drop["id"] not in [row["id"] for row in hit["items"]]
+
+
+def test_starring_rides_on_the_record_not_on_a_second_collection(client):
+    """The panel has two entry points but one write, and one list to filter.
+
+    The behaviour lives in the DOM, which these tests do not drive; the contract
+    is asserted against the source, the same way the mode gate is.
+    """
+    page = client.get("/").text
+    js = client.get("/js/app.js").text.replace("\r\n", "\n")
+    i18n = client.get("/js/i18n.js").text.replace("\r\n", "\n")
+
+    assert 'id="histFav"' in page and 'id="dFav"' in page
+    assert 'symbol id="i-star"' in page
+
+    # One endpoint, and the caller sends the state it wants rather than asking
+    # for a flip — a double click cannot leave the two sides out of step.
+    assert "`/api/jobs/${item.id}/favorite`" in js
+    assert "JSON.stringify({ value: wanted })" in js
+    # The filter narrows the existing list instead of opening a second one.
+    assert 'if (S.historyFav) params.set("fav", "1")' in js
+    assert "/api/jobs/favorites" not in js
+
+    # Every string either view can print exists in both languages.
+    for key in (
+        "favorite", "unfavorite", "favMarked", "favUnmarked",
+        "favFilter", "favOn", "favOff", "historyFavEmpty",
+    ):
+        assert i18n.count(f"\n    {key}:") == 2, key
+
+
+def test_the_star_shares_the_clock_line_instead_of_a_column_of_its_own(client):
+    """A 12px star in a grid column of its own cost the title 36px of width.
+
+    It now rides in the metadata line, immediately before the clock, so the row
+    is back to two cells and the title gets the space the star used to hold.
+    Asserted against the source because this was purely a layout decision: a
+    later edit to either file could undo it without breaking any behaviour.
+    """
+    js = client.get("/js/app.js").text.replace("\r\n", "\n")
+    css = client.get("/css/app.css").text.replace("\r\n", "\n")
+
+    # Built inside the metadata line, ahead of the clock it precedes.
+    markup = js.split("row.innerHTML =")[1].split("row.onclick")[0]
+    assert 'class="hfav' in markup
+    assert markup.index('class="hfav') < markup.index('<i class="when"'), (
+        "the star is built after the clock, so it would sit to its right"
+    )
+    # It is a mark, not a button: the row is the click target it sits inside.
+    assert "<button type=\"button\" class=\"hfav" not in markup
+    assert 'role="img"' in markup
+
+    # The row is two cells again, and nothing else still reserves the old third.
+    hrow = next(line for line in css.splitlines() if line.startswith(".hrow {"))
+    assert "46px minmax(0, 1fr)" in hrow
+    assert "26px" not in hrow
+
+    # The star's box follows the clock's line height rather than fixing its own,
+    # so it can never be the thing that makes the row taller.
+    star = next(line for line in css.splitlines() if line.startswith(".hrow .hfav {"))
+    assert "align-self: stretch" in star
+    assert "height:" not in star
+    assert "margin-left: auto" in star, "the push-to-the-edge moved onto the star"
+    # And the clock gave that push up, or the two auto margins would share it.
+    when = next(line for line in css.splitlines() if line.startswith(".hrow .mt .mrow .when"))
+    assert "margin-left: auto" not in when
+
+    # The glyph shrank to the line; a 15px icon in a 16.5px line reads oversized.
+    assert '${icon("i-star", 12)}' in markup
+
+
+def test_the_star_on_a_row_only_reports_state(client):
+    """A row's star must not write anything.
+
+    Opening a record is a click on the row, and the star sits inside that row's
+    click target, so a star that also toggled a favourite turned every slightly
+    off-centre tap into a silent edit of the record the user meant to open. The
+    mark now only reports; writing lives in the detail header and the filter,
+    where a mis-tap costs nothing.
+    """
+    js = client.get("/js/app.js").text.replace("\r\n", "\n")
+    css = client.get("/css/app.css").text.replace("\r\n", "\n")
+    i18n = client.get("/js/i18n.js").text.replace("\r\n", "\n")
+
+    markup = js.split("row.innerHTML =")[1].split("row.onclick")[0]
+
+    # No button, no pressed state, and no click handler wired to the mark.
+    assert "<button type=\"button\" class=\"hfav" not in markup
+    assert "aria-pressed" not in markup
+    assert 'row.querySelector(".hfav")' not in js, (
+        "the row's star is wired to something again"
+    )
+    # The one write path is the detail header, which is a button of its own.
+    assert js.count("toggleFavorite(") == 2, (
+        "expected the definition and the detail button, nothing else"
+    )
+    detail_wiring = js.split('$("dFav").onclick')[1].split('$("historySearch")')[0]
+    assert "toggleFavorite(item)" in detail_wiring
+
+    # A mark is described by its state, not by an action it would perform —
+    # "Unfavorite" on a row would be an instruction the row cannot carry out.
+    assert (
+        'const favState = item.favorite ? tr("favMarked") : tr("favUnmarked");' in js
+    )
+    assert '${esc(favState)}' in markup
+    assert 'tr("favorite")' not in markup
+    assert 'tr("unfavorite")' not in markup
+
+    # And it must not look pressable: no hover response, no hit area of its own.
+    star_rules = [
+        line for line in css.splitlines() if line.startswith(".hrow .hfav")
+    ]
+    assert star_rules, "the star lost its rule"
+    assert not any("::after" in line for line in star_rules)
+    assert not any(":hover" in line for line in star_rules)
+    assert not any(line.startswith(".hrow:hover .hfav") for line in css.splitlines())
+
+    # The empty shelf used to send people to a star they cannot press.
+    for key in ("favMarked", "favUnmarked"):
+        assert i18n.count(f"\n    {key}:") == 2, key
+    assert "点任意一行右侧的星标" not in i18n
+    assert "Star any row" not in i18n

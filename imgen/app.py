@@ -12,7 +12,16 @@ from typing import Any
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import (
+    Body,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -120,6 +129,9 @@ def _public_job(item: dict[str, Any], engine=None) -> dict[str, Any]:
     tell "still encoding, be patient" apart from "nothing is happening".
     """
     refs = item.pop("ref_paths", None) or []
+    # A mark on the record, so every view of it agrees — the row's star and the
+    # one in the detail panel read the same field, and a reload cannot disagree.
+    item["favorite"] = bool(item.get("favorite"))
     has_image = bool(item.get("image_path") or item.get("thumb_path"))
     item.pop("image_path", None)
     item.pop("thumb_path", None)
@@ -571,14 +583,43 @@ def create_app(demo: bool | None = None, home: Path | None = None) -> FastAPI:
         return {"ok": True}
 
     @app.get("/api/jobs")
-    def list_jobs(limit: int = 80, offset: int = 0, q: str = "") -> dict[str, Any]:
+    def list_jobs(limit: int = 80, offset: int = 0, q: str = "", fav: int = 0) -> dict[str, Any]:
+        """One page of history, optionally narrowed to the favourites.
+
+        `fav` is a second filter rather than a separate list endpoint: the
+        starred rows are the same records seen through a narrower window, so
+        search, paging and ordering keep behaving the same way on both.
+        """
+        only_fav = bool(fav)
         items = [
             _public_job(item, engine)
-            for item in history.list(limit=limit, offset=offset, query=q)
+            for item in history.list(limit=limit, offset=offset, query=q, favorite=only_fav)
         ]
         # `total` lets the browser know whether another page exists without
         # guessing from the page size.
-        return {"items": items, "total": history.count(query=q), "offset": offset, "limit": limit}
+        return {
+            "items": items,
+            "total": history.count(query=q, favorite=only_fav),
+            "offset": offset,
+            "limit": limit,
+        }
+
+    @app.post("/api/jobs/{job_id}/favorite")
+    def set_job_favorite(
+        job_id: str,
+        payload: dict[str, Any] | None = Body(default=None),
+    ) -> dict[str, Any]:
+        """Star or unstar a record. Idempotent: the request carries the value.
+
+        A body-less call stars it, which makes `curl -X POST` do the obvious
+        thing; `{"value": false}` takes the mark off. 404 rather than creating a
+        row — a favourite is a property of a record, not a record of its own.
+        """
+        if not history.get(job_id):
+            raise HTTPException(404, "Job not found.")
+        wanted = True if payload is None else bool(payload.get("value", True))
+        updated = history.set_favorite(job_id, wanted)
+        return {"ok": True, "id": job_id, "favorite": bool(updated and updated["favorite"])}
 
     @app.get("/api/jobs/{job_id}")
     def get_job(job_id: str) -> dict[str, Any]:

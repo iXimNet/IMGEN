@@ -54,6 +54,9 @@
   <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="8 12.2 11 15.2 16 9.6"/></symbol>
   <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13.5"/><line x1="12" y1="17" x2="12" y2="17.01"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+  <!-- A favourite is a mark on the record, so the same glyph is used to set it
+       and to filter by it. The stroked outline fills in when it is on. -->
+  <symbol id="i-star" viewBox="0 0 24 24"><polygon points="12 3.2 14.9 9.2 21.4 10.1 16.7 14.7 17.8 21.2 12 18.1 6.2 21.2 7.3 14.7 2.6 10.1 9.1 9.2"/></symbol>
   <symbol id="i-eye" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></symbol>
   <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M17.9 17.9A10.1 10.1 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.1-5.9"/><path d="M9.9 4.2A10.9 10.9 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.2 3.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><line x1="2" y1="2" x2="22" y2="22"/></symbol>
   <symbol id="i-shuffle" viewBox="0 0 24 24"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></symbol>
@@ -332,6 +335,11 @@
           <svg class="ico" width="15" height="15"><use href="#i-search"/></svg>
           <input id="historySearch" type="search" />
         </div>
+        <!-- A filter, not a mode: search keeps working inside it, and the rows
+             on screen are the same records seen through a narrower window. -->
+        <button type="button" class="icon-btn" id="histFav" aria-pressed="false">
+          <svg class="ico" width="16" height="16"><use href="#i-star"/></svg>
+        </button>
       </div>
       <div class="scroll"><div class="hlist" id="historyList"></div></div>
     </aside>
@@ -445,6 +453,12 @@
       <aside class="dpanel">
         <header class="dpanel-head">
           <h3 id="dPanelTitle" data-i="detailPanelTitle">详情</h3>
+          <!-- The star sits with the title rather than in the footer: the
+               footer already carries delete, reuse and send, and a fourth
+               label is what pushed the English one past the panel. -->
+          <button type="button" class="icon-btn" id="dFav" aria-pressed="false">
+            <svg class="ico" width="16" height="16"><use href="#i-star"/></svg>
+          </button>
           <span class="grow"></span>
           <button type="button" class="nav-arrow prev" id="dPrev" aria-label="上一条"><svg class="ico" width="15" height="15"><use href="#i-chev"/></svg></button>
           <button type="button" class="nav-arrow next" id="dNext" aria-label="下一条"><svg class="ico" width="15" height="15"><use href="#i-chev"/></svg></button>

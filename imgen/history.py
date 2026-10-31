@@ -32,10 +32,19 @@ CREATE TABLE IF NOT EXISTS jobs (
     thumb_path TEXT,
     ref_paths_json TEXT,
     status TEXT NOT NULL,
-    error TEXT
+    error TEXT,
+    favorite INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at DESC);
 """
+
+# Columns that arrived after the first release. `CREATE TABLE IF NOT EXISTS`
+# leaves an existing table exactly as it found it, so a database written by an
+# older build keeps the old shape and every statement naming a new column would
+# fail at the first query. They are added by hand, once, on startup.
+MIGRATIONS = {
+    "favorite": "ALTER TABLE jobs ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0",
+}
 
 
 def new_id() -> str:
@@ -52,6 +61,15 @@ class History:
         paths.ensure()
         with self._connect() as conn:
             conn.executescript(SCHEMA)
+            self._migrate(conn)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """Bring a table created by an older build up to the current shape."""
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
+        for name, statement in MIGRATIONS.items():
+            if name not in columns:
+                conn.execute(statement)
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.paths.db_file)
@@ -78,6 +96,7 @@ class History:
             "ref_paths_json": json.dumps(record.get("ref_paths") or [], ensure_ascii=False),
             "status": record.get("status") or "running",
             "error": record.get("error"),
+            "favorite": 1 if record.get("favorite") else 0,
         }
         with self._connect() as conn:
             conn.execute(
@@ -85,11 +104,11 @@ class History:
                 INSERT INTO jobs (
                     id, created_at, mode, model_key, hub, prompt, negative_prompt,
                     params_json, seed, width, height, duration_ms, image_path,
-                    thumb_path, ref_paths_json, status, error
+                    thumb_path, ref_paths_json, status, error, favorite
                 ) VALUES (
                     :id, :created_at, :mode, :model_key, :hub, :prompt, :negative_prompt,
                     :params_json, :seed, :width, :height, :duration_ms, :image_path,
-                    :thumb_path, :ref_paths_json, :status, :error
+                    :thumb_path, :ref_paths_json, :status, :error, :favorite
                 )
                 """,
                 row,
@@ -131,7 +150,7 @@ class History:
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         return self._to_dict(row) if row else None
 
-    def _list_filter(self, query: str) -> tuple[str, list[Any]]:
+    def _list_filter(self, query: str, favorite: bool = False) -> tuple[str, list[Any]]:
         """Shared WHERE clause so `list` and `count` can never disagree."""
         sql = " FROM jobs WHERE status != 'deleted'"
         params: list[Any] = []
@@ -139,22 +158,34 @@ class History:
             sql += " AND (prompt LIKE ? OR mode LIKE ? OR model_key LIKE ?)"
             like = f"%{query}%"
             params.extend([like, like, like])
+        if favorite:
+            sql += " AND favorite = 1"
         return sql, params
 
-    def list(self, limit: int = 80, offset: int = 0, query: str = "") -> list[dict[str, Any]]:
-        where, params = self._list_filter(query)
+    def list(
+        self,
+        limit: int = 80,
+        offset: int = 0,
+        query: str = "",
+        favorite: bool = False,
+    ) -> list[dict[str, Any]]:
+        where, params = self._list_filter(query, favorite)
         sql = "SELECT *" + where + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         with self._connect() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [self._to_dict(row) for row in rows]
 
-    def count(self, query: str = "") -> int:
+    def count(self, query: str = "", favorite: bool = False) -> int:
         """How many records the current filter matches, for paging decisions."""
-        where, params = self._list_filter(query)
+        where, params = self._list_filter(query, favorite)
         with self._connect() as conn:
             row = conn.execute("SELECT COUNT(*)" + where, params).fetchone()
         return int(row[0]) if row else 0
+
+    def set_favorite(self, job_id: str, favorite: bool) -> dict[str, Any] | None:
+        """Mark or unmark one record. A mark, not a copy — the record stays put."""
+        return self.update(job_id, favorite=1 if favorite else 0)
 
     def delete(self, job_id: str) -> bool:
         record = self.get(job_id)
@@ -215,4 +246,7 @@ class History:
         data = dict(row)
         data["params"] = json.loads(data.pop("params_json") or "{}")
         data["ref_paths"] = json.loads(data.pop("ref_paths_json") or "[]")
+        # SQLite has no boolean type: the column is 0/1, and a caller that gets
+        # an int back would end up sending `favorite: 0` to the browser.
+        data["favorite"] = bool(data.get("favorite"))
         return data
